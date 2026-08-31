@@ -10,3 +10,5 @@ coverage
 *.tsbuildinfo
 .env
 .env.*
+# Local checkout of auxon/yours-agent for the VM Chrome extension + MCP sidecar
+yours-agent
