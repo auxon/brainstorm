@@ -18,6 +18,9 @@ import {
   integrationIdentifier,
   isArchiveActive,
   stripePaymentsReady,
+  stripeEnvLivemode,
+  archiveLineItems,
+  productionRequiresLiveStripe,
   type BillingEnv,
 } from "./billing-lib";
 
@@ -108,6 +111,13 @@ async function requireActor(c: Ctx): Promise<WalletUser> {
   return user;
 }
 
+function assertLiveOnProduction(c: Ctx, env: BillingEnv): void {
+  const livemode = stripeEnvLivemode(env);
+  if (productionRequiresLiveStripe(new URL(c.req.url).hostname, livemode)) {
+    throw new HttpError(503, "Production Checkout requires live Stripe keys");
+  }
+}
+
 function siteOrigin(request: Request): string {
   const url = new URL(request.url);
   if (url.hostname === "entangleit.com") return "https://entangleit.com";
@@ -180,12 +190,14 @@ export function registerBillingRoutes(api: App): void {
     const env = c.env as BillingEnv;
     const configured = billingConfigured(env);
     const payments = stripePaymentsReady(env);
+    const livemode = stripeEnvLivemode(env);
     const user = c.get("user");
     const row = user ? await loadBillingUser(c.env.DB, user.id) : null;
     const siteWallet = await siteWalletStatus(env);
     return c.json({
       configured,
       payments,
+      livemode,
       publishableKey: configured || payments ? env.STRIPE_PUBLISHABLE_KEY ?? null : null,
       priceId: configured ? env.STRIPE_PRICE_ID ?? null : null,
       amountUsd: ARCHIVE_AMOUNT_USD,
@@ -204,9 +216,10 @@ export function registerBillingRoutes(api: App): void {
   api.post("/billing/checkout", async (c) => {
     const user = await requireActor(c);
     const env = c.env as BillingEnv;
-    if (!billingConfigured(env) || !env.STRIPE_PRICE_ID) {
+    if (!billingConfigured(env)) {
       throw new HttpError(503, "Billing is not configured");
     }
+    assertLiveOnProduction(c, env);
     const stripe = stripeClient(env);
     const existing = await loadBillingUser(c.env.DB, user.id);
     if (isArchiveActive(existing?.stripe_status)) {
@@ -218,7 +231,7 @@ export function registerBillingRoutes(api: App): void {
       mode: "subscription",
       customer: customerId,
       client_reference_id: user.id,
-      line_items: [{ price: env.STRIPE_PRICE_ID, quantity: 1 }],
+      line_items: archiveLineItems(env.STRIPE_PRICE_ID, stripeEnvLivemode(env)) as Stripe.Checkout.SessionCreateParams["line_items"],
       success_url: `${origin}${APP_PREFIX}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}${APP_PREFIX}/billing?checkout=cancel`,
       allow_promotion_codes: true,
@@ -234,6 +247,7 @@ export function registerBillingRoutes(api: App): void {
     const user = await requireActor(c);
     const env = c.env as BillingEnv;
     if (!stripePaymentsReady(env)) throw new HttpError(503, "Billing is not configured");
+    assertLiveOnProduction(c, env);
     const body = (await c.req.json().catch(() => null)) as { slug?: string } | null;
     const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
     if (!slug) throw new HttpError(400, "slug required");
@@ -278,6 +292,7 @@ export function registerBillingRoutes(api: App): void {
     const user = await requireActor(c);
     const env = c.env as BillingEnv;
     if (!stripePaymentsReady(env)) throw new HttpError(503, "Billing is not configured");
+    assertLiveOnProduction(c, env);
     const body = (await c.req.json().catch(() => null)) as {
       slug?: string;
       targetType?: string;
@@ -372,6 +387,7 @@ export function registerBillingRoutes(api: App): void {
     const user = await requireActor(c);
     const row = await loadBillingUser(c.env.DB, user.id);
     if (!row?.stripe_customer_id) throw new HttpError(400, "No Stripe customer yet — subscribe first");
+    assertLiveOnProduction(c, c.env as BillingEnv);
     const stripe = stripeClient(c.env as BillingEnv);
     const origin = siteOrigin(c.req.raw);
     const portal = await stripe.billingPortal.sessions.create({

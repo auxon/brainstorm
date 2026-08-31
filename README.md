@@ -110,6 +110,31 @@ collects the list price only. See
 
 Never commit or print `SITE_WALLET_WIF` or Stripe secret keys.
 
+## Live Checkout
+
+Production (`entangleit.com`) **rejects test-mode keys**. Archive, Featured, and
+USD boosts use the Worker secret `STRIPE_SECRET_KEY`. A live restricted key
+(`rk_live_…`) is required; the test catalog price in `wrangler.jsonc` is ignored
+in live mode and Archive is created with `price_data` ($9/mo). Featured and
+boosts already use `price_data`.
+
+```bash
+# Restricted live key (Checkout, Customers, Subscriptions, Webhooks, Billing portal)
+npx wrangler secret put STRIPE_SECRET_KEY
+# Signing secret from the *live* webhook endpoint
+npx wrangler secret put STRIPE_WEBHOOK_SECRET
+```
+
+Create a **live** webhook at
+`https://entangleit.com/brainstorm/api/billing/webhook` for
+`checkout.session.completed` and `customer.subscription.*`. Test and live
+signing secrets are different — the Worker secret must match the live endpoint.
+
+Optional: set `STRIPE_PUBLISHABLE_KEY` to `pk_live_…` (publishable keys are
+public). Do not put `rk_live_` / `sk_live_` in git.
+
+Local `vite dev` can keep test keys. `localhost` is not fail-closed.
+
 ## Featured boards and USD boosts
 
 - **Explore:** [https://entangleit.com/brainstorm/explore](https://entangleit.com/brainstorm/explore)

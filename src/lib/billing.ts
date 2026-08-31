@@ -13,6 +13,7 @@ export type BillingStatus = {
   active: boolean;
   hasCustomer: boolean;
   payments?: boolean;
+  livemode?: boolean | null;
   featureUsd?: number;
   featureDays?: number;
   boosts?: number[];

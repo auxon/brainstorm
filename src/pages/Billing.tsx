@@ -104,6 +104,15 @@ export function BillingPage() {
             <li>Cancel anytime in the Stripe customer portal</li>
             <li>Featured ($29 / 7 days) and $1–$5 boosts are separate one-off payments</li>
           </ul>
+          {status?.livemode === false ? (
+            <p className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              Stripe is in <span className="font-medium">test mode</span>. Cards will not be charged. Production
+              at entangleit.com requires live keys.
+            </p>
+          ) : null}
+          {status?.livemode === true ? (
+            <p className="mt-4 text-sm text-accent">Live Checkout — charges settle on the Stripe account.</p>
+          ) : null}
           {status?.active ? (
             <p className="mt-4 text-sm text-accent">Archive is active{status.status ? ` (${status.status})` : ""}.</p>
           ) : (
@@ -126,7 +135,7 @@ export function BillingPage() {
                 onClick={() => void checkout()}
                 className="h-11 rounded-lg bg-accent text-sm font-medium text-bg disabled:opacity-60"
               >
-                {busy ? "Redirecting to Stripe…" : "Subscribe with Stripe"}
+                {busy ? "Redirecting to Stripe…" : status?.livemode === false ? "Subscribe (test mode)" : "Subscribe with Stripe"}
               </button>
             )}
             {!status?.configured ? (

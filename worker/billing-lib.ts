@@ -59,9 +59,53 @@ export type BillingEnv = Env & {
 };
 
 export function billingConfigured(env: BillingEnv): boolean {
-  return Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_ID);
+  return Boolean(env.STRIPE_SECRET_KEY);
 }
 
 export function stripePaymentsReady(env: BillingEnv): boolean {
   return Boolean(env.STRIPE_SECRET_KEY);
+}
+
+/** Live vs test from the key prefix. Sandbox keys (`rkcs_test_`) are test. */
+export function stripeKeyLivemode(key: string | null | undefined): boolean | null {
+  if (!key) return null;
+  if (key.includes("_live_")) return true;
+  if (key.includes("_test_")) return false;
+  return null;
+}
+
+export function stripeEnvLivemode(env: BillingEnv): boolean | null {
+  return stripeKeyLivemode(env.STRIPE_SECRET_KEY) ?? stripeKeyLivemode(env.STRIPE_PUBLISHABLE_KEY);
+}
+
+/**
+ * Archive line items. Live keys cannot use a test-mode catalog price, so live
+ * (and any env without STRIPE_PRICE_ID) uses ad-hoc `price_data`.
+ */
+export function archiveLineItems(
+  priceId: string | undefined,
+  livemode: boolean | null,
+): Array<{ price: string; quantity: number } | { quantity: number; price_data: Record<string, unknown> }> {
+  if (priceId && livemode !== true) {
+    return [{ price: priceId, quantity: 1 }];
+  }
+  return [
+    {
+      quantity: 1,
+      price_data: {
+        currency: "usd",
+        unit_amount: ARCHIVE_AMOUNT_USD * 100,
+        recurring: { interval: ARCHIVE_INTERVAL },
+        product_data: {
+          name: "Brainstorm Archive",
+          description: "Mint brainstorm sessions as 1Sat Ordinal NFTs via the site wallet",
+        },
+      },
+    },
+  ];
+}
+
+/** Production hostname must not charge in Stripe test mode. */
+export function productionRequiresLiveStripe(hostname: string, livemode: boolean | null): boolean {
+  return hostname === "entangleit.com" && livemode !== true;
 }
