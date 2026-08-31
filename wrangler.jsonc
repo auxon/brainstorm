@@ -22,10 +22,7 @@
   },
   "vars": {
     "STRIPE_PRICE_ID": "price_1UAcKDAM3UEsVBQxvGpZTh1C",
-    "STRIPE_PUBLISHABLE_KEY": "pk_test_51UAbgbAM3UEsVBQxqC4aOf32Z6gMQSiQ7KI3maRO3X9bRRW9agrgjgqvvE0uLG98LEhRWPA2JHkfB7JDHqqcZFUL00k1TczW1Z",
-    // Public OAuth client id. Override with `wrangler secret put GOOGLE_CLIENT_ID`
-    // if you prefer not to keep it in git. Secret stays a Wrangler secret.
-    "GOOGLE_CLIENT_ID": ""
+    "STRIPE_PUBLISHABLE_KEY": "pk_test_51UAbgbAM3UEsVBQxqC4aOf32Z6gMQSiQ7KI3maRO3X9bRRW9agrgjgqvvE0uLG98LEhRWPA2JHkfB7JDHqqcZFUL00k1TczW1Z"
   },
   "observability": {
     "enabled": true,

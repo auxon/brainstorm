@@ -111,10 +111,16 @@ describe("google identity", () => {
 
   it("requires both client id and secret", () => {
     expect(googleConfigured({} as Env)).toBe(false);
-    expect(googleConfigured({ GOOGLE_CLIENT_ID: "id.apps.googleusercontent.com" } as Env)).toBe(false);
+    expect(googleConfigured({ BS_GOOGLE_CLIENT_ID: "id.apps.googleusercontent.com" } as Env)).toBe(false);
     expect(
       googleConfigured({
-        GOOGLE_CLIENT_ID: "id.apps.googleusercontent.com",
+        BS_GOOGLE_CLIENT_ID: "id.apps.googleusercontent.com",
+        GOOGLE_CLIENT_SECRET: "secret",
+      } as Env),
+    ).toBe(true);
+    expect(
+      googleConfigured({
+        GOOGLE_CLIENT_ID: "legacy.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET: "secret",
       } as Env),
     ).toBe(true);

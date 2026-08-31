@@ -77,7 +77,7 @@ export function LoginPage() {
         {googleReady === false ? (
           <p className="mt-2 text-xs text-muted">
             Google OAuth is not configured on this Worker yet. Add{" "}
-            <code className="text-fg">GOOGLE_CLIENT_ID</code> and{" "}
+            <code className="text-fg">BS_GOOGLE_CLIENT_ID</code> and{" "}
             <code className="text-fg">GOOGLE_CLIENT_SECRET</code>, then retry.
           </p>
         ) : null}

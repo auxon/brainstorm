@@ -30,15 +30,19 @@ export function googleUserId(sub: string): string {
 }
 
 export function googleConfigured(env: Env): boolean {
-  return Boolean(googleClientId(env) && env.GOOGLE_CLIENT_SECRET);
+  return Boolean(googleClientId(env) && googleClientSecret(env));
 }
 
 export function googleClientId(env: Env): string {
-  return (env.GOOGLE_CLIENT_ID ?? "").trim();
+  return (env.BS_GOOGLE_CLIENT_ID || env.GOOGLE_CLIENT_ID || "").trim();
+}
+
+export function googleClientSecret(env: Env): string {
+  return (env.BS_GOOGLE_CLIENT_SECRET || env.GOOGLE_CLIENT_SECRET || "").trim();
 }
 
 function tokenSealKey(env: Env): string {
-  const key = (env.GOOGLE_TOKEN_KEY || env.GOOGLE_CLIENT_SECRET || "").trim();
+  const key = (env.BS_GOOGLE_TOKEN_KEY || env.GOOGLE_TOKEN_KEY || googleClientSecret(env)).trim();
   if (!key) throw new HttpError(503, "Google Drive is not configured");
   return key;
 }
@@ -176,7 +180,7 @@ export function googleSetupHtml(): string {
 <body>
   <h1>Google sign-in is not configured</h1>
   <p>Add a Google Cloud OAuth web client, enable the Drive API, then set Worker secrets:</p>
-  <p><code>npx wrangler secret put GOOGLE_CLIENT_ID</code><br>
+  <p><code>npx wrangler secret put BS_GOOGLE_CLIENT_ID</code><br>
   <code>npx wrangler secret put GOOGLE_CLIENT_SECRET</code></p>
   <p>Authorized redirect URI:</p>
   <p><code>https://entangleit.com/brainstorm/api/auth/google/callback</code></p>
@@ -253,7 +257,7 @@ async function exchangeCode(
 ): Promise<GoogleTokenResponse> {
   const body = new URLSearchParams({
     client_id: googleClientId(env),
-    client_secret: env.GOOGLE_CLIENT_SECRET as string,
+    client_secret: googleClientSecret(env),
     code,
     code_verifier: verifier,
     grant_type: "authorization_code",
@@ -470,7 +474,7 @@ export async function getValidAccessToken(env: Env, userId: string): Promise<str
   const refresh = await openSecret(row.refresh_token_enc, key);
   const body = new URLSearchParams({
     client_id: googleClientId(env),
-    client_secret: env.GOOGLE_CLIENT_SECRET as string,
+    client_secret: googleClientSecret(env),
     refresh_token: refresh,
     grant_type: "refresh_token",
   });

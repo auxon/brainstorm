@@ -124,13 +124,13 @@ use preview URLs) as authorized redirect URIs. Enable the **Google Drive API**.
 OAuth scopes: `openid email profile` and `https://www.googleapis.com/auth/drive.file`.
 
 ```bash
-npx wrangler secret put GOOGLE_CLIENT_ID
+# Client id cannot be named GOOGLE_CLIENT_ID if that var already exists.
+npx wrangler secret put BS_GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 # optional extra AES key for stored refresh tokens; defaults to the client secret
 npx wrangler secret put GOOGLE_TOKEN_KEY
 ```
 
-You can instead set the public client id as the `GOOGLE_CLIENT_ID` Worker var.
 Do not put the client secret in git.
 
 After consent, the Worker stores an encrypted refresh token, creates a
