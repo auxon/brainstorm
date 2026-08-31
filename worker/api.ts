@@ -21,6 +21,13 @@ import { nanoid, newId, randomToken, sha256Hex, timingSafeEqualStr } from "./ids
 import { APP_PREFIX } from "./paths";
 import { ensureSchema } from "./schema";
 import { registerBillingRoutes, transferBilling, userHasArchive } from "./billing";
+import {
+  disconnectGoogle,
+  googleStatus,
+  handleGoogleCallback,
+  startGoogleOAuth,
+} from "./google";
+import { importDriveFile, listDriveFiles, saveGraphToDrive } from "./drive";
 import { NFT_CONTENT_TYPE, NFT_MAX_BYTES, nftOriginFromTxid, type BillingEnv } from "./billing-lib";
 import { inscribeMarkdown } from "./site-wallet";
 import { activeFeaturedUntil } from "./commerce";
@@ -168,6 +175,52 @@ api.post("/wallet-auth/signout", async (c) => {
   await revokeSession(c.req.raw, c.env.DB);
   c.header("set-cookie", buildClearCookie(requestIsSecure(c.req.raw), APP_PREFIX));
   return c.json({ ok: true });
+});
+
+// ── Google sign-in + Drive ──────────────────────────────────────────────────
+
+api.get("/auth/google/status", async (c) => c.json(await googleStatus(c.env, c.get("user"))));
+
+api.get("/auth/google/start", async (c) => startGoogleOAuth(c.env, c.req.raw, c.get("user")));
+
+api.get("/auth/google/callback", async (c) => handleGoogleCallback(c.env, c.req.raw));
+
+api.post("/auth/google/disconnect", async (c) => {
+  assertSameOriginPost(c.req.raw);
+  const user = c.get("user");
+  if (!user) throw new HttpError(401, "Sign in first");
+  await disconnectGoogle(c.env, user.id);
+  return c.json({ ok: true });
+});
+
+api.get("/drive/files", async (c) => {
+  const user = c.get("user");
+  if (!user) throw new HttpError(401, "Sign in with Google to use Drive");
+  return c.json({ files: await listDriveFiles(c.env, user.id) });
+});
+
+api.post("/drive/import", async (c) => {
+  assertSameOriginPost(c.req.raw);
+  const user = c.get("user");
+  if (!user) throw new HttpError(401, "Sign in with Google to use Drive");
+  const body = await readJson(c.req.raw);
+  const fileId = typeof body.fileId === "string" ? body.fileId : "";
+  if (!fileId) throw new HttpError(400, "fileId is required");
+  const imported = await importDriveFile(c.env, user, fileId);
+  return c.json({
+    session: toPublic(imported.session, user, true),
+    editToken: imported.editToken,
+    viewToken: imported.viewToken,
+  });
+});
+
+api.post("/sessions/:slug/drive/save", async (c) => {
+  assertSameOriginPost(c.req.raw);
+  const user = c.get("user");
+  if (!user) throw new HttpError(401, "Sign in with Google to use Drive");
+  const graph = await loadGraph(c, { requireEdit: true });
+  const saved = await saveGraphToDrive(c.env, user, graph);
+  return c.json(saved);
 });
 
 // ── Sessions ────────────────────────────────────────────────────────────────

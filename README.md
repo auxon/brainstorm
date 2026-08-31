@@ -5,7 +5,9 @@ Collaborative idea boards and mind maps at
 
 Create a session, post nested ideas, comment, **upvote**, export Markdown or
 HTML, and share the mind map by URL. **No browser wallet is required.** The
-first write mints a guest identity (cookie). **Archive** ($9/month via Stripe)
+first write mints a guest identity (cookie). **Sign in with Google** to save
+and reopen boards from a **Brainstorm** folder on Google Drive (`drive.file`
+scope — only files this app creates). **Archive** ($9/month via Stripe)
 lets you mint a session as a **1Sat Ordinal NFT**; the **site wallet** (Worker
 secret, funded with BSV) inscribes it. **Featured boards** ($29 for 7 days)
 appear on [Explore](https://entangleit.com/brainstorm/explore). **USD boosts**
@@ -109,6 +111,35 @@ collects the list price only. See
 [Collect taxes for recurring payments](https://docs.stripe.com/billing/taxes/collect-taxes).
 
 Never commit or print `SITE_WALLET_WIF` or Stripe secret keys.
+
+## Google sign-in and Drive
+
+Brainstorm uses Google OAuth (authorization code + PKCE) on the Worker. Humans
+click **Continue with Google** on `/login`. Callback:
+
+`https://entangleit.com/brainstorm/api/auth/google/callback`
+
+Also add the same path on `localhost:5173` (and the `workers.dev` host if you
+use preview URLs) as authorized redirect URIs. Enable the **Google Drive API**.
+OAuth scopes: `openid email profile` and `https://www.googleapis.com/auth/drive.file`.
+
+```bash
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+# optional extra AES key for stored refresh tokens; defaults to the client secret
+npx wrangler secret put GOOGLE_TOKEN_KEY
+```
+
+You can instead set the public client id as the `GOOGLE_CLIENT_ID` Worker var.
+Do not put the client secret in git.
+
+After consent, the Worker stores an encrypted refresh token, creates a
+**Brainstorm** folder in the user’s Drive, and writes
+`{title}.brainstorm.json` snapshots (ideas, comments, edges). **Save to Drive**
+updates the same file; **Open** / the home **On Google Drive** list imports a
+copy as a new unlisted session.
+
+Stripe Projects has no Google provider — credentials come from Google Cloud.
 
 ## Live Checkout
 

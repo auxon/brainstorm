@@ -1,19 +1,39 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { Wallet } from "lucide-react";
 import { Shell } from "@/components/Header";
+import { GoogleIcon } from "@/components/GoogleIcon";
 import { useYoursWallet } from "@/lib/wallet-store";
-import { refreshSession, walletSignIn, wrapWalletAuthError } from "@/lib/auth";
+import { refreshSession, useSession, walletSignIn, wrapWalletAuthError } from "@/lib/auth";
+import { fetchGoogleStatus, googleStartUrl } from "@/lib/google";
 import { YOURS_CHROME, YOURS_SITE } from "@/lib/yours";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const { user } = useSession();
   const { status, session, connect } = useYoursWallet();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [googleReady, setGoogleReady] = useState<boolean | null>(null);
 
-  async function signIn() {
+  useEffect(() => {
+    void fetchGoogleStatus()
+      .then((s) => setGoogleReady(s.configured))
+      .catch(() => setGoogleReady(false));
+  }, []);
+
+  useEffect(() => {
+    if (params.get("google") === "connected") {
+      void refreshSession().then(() => {
+        toast.success("Signed in with Google");
+        navigate("/", { replace: true });
+      });
+    }
+  }, [params, navigate]);
+
+  async function signInWallet() {
     setBusy(true);
     setNote(null);
     try {
@@ -35,41 +55,64 @@ export function LoginPage() {
   return (
     <Shell>
       <div className="mx-auto max-w-md">
-        <p className="text-xs uppercase tracking-[0.2em] text-muted">Optional</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">BSV wallet (optional)</h1>
+        <p className="text-xs uppercase tracking-[0.2em] text-muted">Account</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight">Sign in</h1>
         <p className="mt-3 text-muted">
-          Boards, votes, Archive, Featured, USD boosts, and NFT mints work without a wallet. Connect Yours only
-          if you want a BSV identity and to boost ideas with sats from your own keys. The site wallet
-          holds the treasury that inscribes Archive NFTs.
+          Use Google to keep boards in your Drive. Yours Wallet is optional and only needed for sat
+          boosts from your own keys.
         </p>
-        <button
-          type="button"
-          disabled={busy || status === "missing"}
-          onClick={() => void signIn()}
-          className="mt-8 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-bg disabled:opacity-50"
-        >
-          <Wallet className="size-4" strokeWidth={1.8} />
-          {busy ? (note ?? "Signing in…") : session ? "Sign signature to continue" : "Connect Yours Wallet"}
-        </button>
-        {status === "missing" ? (
-          <p className="mt-3 text-sm text-muted">
-            The Yours Wallet extension is not detected.{" "}
-            <a href={YOURS_CHROME} className="text-accent hover:underline" target="_blank" rel="noreferrer">
-              Install it in Chrome
-            </a>
-            {" "}only if you want sat boosts. Learn more at{" "}
-            <a href={YOURS_SITE} className="text-accent hover:underline" target="_blank" rel="noreferrer">
-              yours.org
-            </a>
-            .
+        {user?.googleConnected ? (
+          <p className="mt-4 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-sm text-accent">
+            Signed in as {user.displayName || user.email || "Google"}
           </p>
         ) : (
-          <ol className="mt-6 space-y-2 text-sm text-muted">
-            <li>1. Connect Yours Wallet (unlock the extension if needed)</li>
-            <li>2. Approve the sign-in message — no sats leave the wallet</li>
-            <li>3. Boost ideas from your own keys; Archive mints still use the site wallet</li>
-          </ol>
+          <a
+            href={googleStartUrl("/login")}
+            className="mt-8 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-bg"
+          >
+            <GoogleIcon className="size-4" />
+            {googleReady === false ? "Continue with Google (setup required)" : "Continue with Google"}
+          </a>
         )}
+        {googleReady === false ? (
+          <p className="mt-2 text-xs text-muted">
+            Google OAuth is not configured on this Worker yet. Add{" "}
+            <code className="text-fg">GOOGLE_CLIENT_ID</code> and{" "}
+            <code className="text-fg">GOOGLE_CLIENT_SECRET</code>, then retry.
+          </p>
+        ) : null}
+        <div className="mt-8 border-t border-border pt-6">
+          <p className="text-xs uppercase tracking-[0.2em] text-muted">Optional</p>
+          <h2 className="mt-2 text-lg font-medium">BSV wallet</h2>
+          <button
+            type="button"
+            disabled={busy || status === "missing"}
+            onClick={() => void signInWallet()}
+            className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-raised text-sm font-medium text-fg disabled:opacity-50"
+          >
+            <Wallet className="size-4" strokeWidth={1.8} />
+            {busy ? (note ?? "Signing in…") : session ? "Sign signature to continue" : "Connect Yours Wallet"}
+          </button>
+          {status === "missing" ? (
+            <p className="mt-3 text-sm text-muted">
+              The Yours Wallet extension is not detected.{" "}
+              <a href={YOURS_CHROME} className="text-accent hover:underline" target="_blank" rel="noreferrer">
+                Install it in Chrome
+              </a>{" "}
+              only if you want sat boosts. Learn more at{" "}
+              <a href={YOURS_SITE} className="text-accent hover:underline" target="_blank" rel="noreferrer">
+                yours.org
+              </a>
+              .
+            </p>
+          ) : (
+            <ol className="mt-6 space-y-2 text-sm text-muted">
+              <li>1. Connect Yours Wallet (unlock the extension if needed)</li>
+              <li>2. Approve the sign-in message — no sats leave the wallet</li>
+              <li>3. Boost ideas from your own keys; Archive mints still use the site wallet</li>
+            </ol>
+          )}
+        </div>
         <p className="mt-8 text-sm text-muted">
           <Link to="/" className="hover:text-fg">
             Back to Brainstorm

@@ -76,6 +76,9 @@ export async function mintSessionForUser(
     address?: string | null;
     handle?: string | null;
     displayName?: string | null;
+    email?: string | null;
+    picture?: string | null;
+    googleConnected?: boolean;
   },
 ): Promise<{ token: string; user: WalletUser }> {
   const t = Date.now();
@@ -86,7 +89,7 @@ export async function mintSessionForUser(
   if (existing) {
     await db
       .prepare(
-        "UPDATE wallet_users SET last_login_at = ?, identity_key = COALESCE(?, identity_key), address = COALESCE(?, address), handle = COALESCE(?, handle), display_name = COALESCE(?, display_name) WHERE id = ?",
+        "UPDATE wallet_users SET last_login_at = ?, identity_key = COALESCE(?, identity_key), address = COALESCE(?, address), handle = COALESCE(?, handle), display_name = COALESCE(?, display_name), email = COALESCE(?, email), picture = COALESCE(?, picture) WHERE id = ?",
       )
       .bind(
         t,
@@ -94,13 +97,15 @@ export async function mintSessionForUser(
         input.address ?? null,
         input.handle ?? null,
         input.displayName ?? null,
+        input.email ?? null,
+        input.picture ?? null,
         input.userId,
       )
       .run();
   } else {
     await db
       .prepare(
-        "INSERT INTO wallet_users (id, identity_key, address, handle, display_name, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO wallet_users (id, identity_key, address, handle, display_name, email, picture, created_at, last_login_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .bind(
         input.userId,
@@ -108,6 +113,8 @@ export async function mintSessionForUser(
         input.address ?? null,
         input.handle ?? null,
         input.displayName ?? null,
+        input.email ?? null,
+        input.picture ?? null,
         t,
         t,
       )
@@ -128,6 +135,9 @@ export async function mintSessionForUser(
       address: input.address ?? null,
       handle: input.handle ?? null,
       display_name: input.displayName ?? null,
+      email: input.email ?? null,
+      picture: input.picture ?? null,
+      google_sub: input.googleConnected ? "1" : null,
     }),
   };
 }
@@ -144,6 +154,11 @@ function toWalletUser(row: {
   address?: string | null;
   handle?: string | null;
   display_name?: string | null;
+  email?: string | null;
+  picture?: string | null;
+  google_email?: string | null;
+  google_picture?: string | null;
+  google_sub?: string | null;
 }): WalletUser {
   return {
     id: row.id,
@@ -151,7 +166,10 @@ function toWalletUser(row: {
     address: row.address ?? null,
     handle: row.handle ?? null,
     displayName: row.display_name ?? null,
+    email: row.email ?? row.google_email ?? null,
+    picture: row.picture ?? row.google_picture ?? null,
     isGuest: isGuestId(row.id),
+    googleConnected: Boolean(row.google_sub),
   };
 }
 
@@ -248,7 +266,7 @@ export async function getSessionUser(request: Request, db: D1Database): Promise<
   const hash = await sha256Hex(token);
   const row = await db
     .prepare(
-      "SELECT u.id, u.identity_key, u.address, u.handle, u.display_name, s.expires_at FROM wallet_sessions s JOIN wallet_users u ON u.id = s.user_id WHERE s.token_hash = ?",
+      "SELECT u.id, u.identity_key, u.address, u.handle, u.display_name, u.email, u.picture, s.expires_at, g.google_sub, g.email as google_email, g.picture as google_picture FROM wallet_sessions s JOIN wallet_users u ON u.id = s.user_id LEFT JOIN google_accounts g ON g.user_id = u.id WHERE s.token_hash = ?",
     )
     .bind(hash)
     .first<{
@@ -257,6 +275,11 @@ export async function getSessionUser(request: Request, db: D1Database): Promise<
       address: string | null;
       handle: string | null;
       display_name: string | null;
+      email: string | null;
+      picture: string | null;
+      google_sub: string | null;
+      google_email: string | null;
+      google_picture: string | null;
       expires_at: number;
     }>();
   if (!row) return null;

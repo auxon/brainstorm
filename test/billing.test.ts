@@ -52,6 +52,7 @@ describe("identity and heat", () => {
     expect(authorKind("g_abc")).toBe("guest");
     expect(authorKind(SITE_AGENT_PUBKEY)).toBe("agent");
     expect(authorKind("0224deadbeef")).toBe("human");
+    expect(authorKind("go_123456789")).toBe("human");
     expect(authorKindLabel("agent")).toBe("Agent");
   });
 

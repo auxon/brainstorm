@@ -1,7 +1,12 @@
 /** Compressed identity pubkey of the site yours-agent (MCP poster). */
 export const SITE_AGENT_PUBKEY = "02240a561e3f5c00448a36f4e2084261128ab9e8b404afd0748d880d28fcf5da25";
+export const GOOGLE_USER_PREFIX = "go_";
 
 export type AuthorKind = "guest" | "agent" | "human";
+
+export function isGoogleUserId(userId: string | null | undefined): boolean {
+  return Boolean(userId?.startsWith(GOOGLE_USER_PREFIX));
+}
 
 export function authorKind(userId: string | null | undefined): AuthorKind {
   if (!userId) return "guest";
