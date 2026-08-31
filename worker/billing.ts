@@ -21,6 +21,8 @@ import {
   stripeEnvLivemode,
   archiveLineItems,
   productionRequiresLiveStripe,
+  isStripeMissingResource,
+  stripeErrorMessage,
   type BillingEnv,
 } from "./billing-lib";
 
@@ -131,10 +133,28 @@ function presentedToken(request: Request): string | null {
 
 async function ensureCustomer(db: D1Database, stripe: Stripe, user: WalletUser): Promise<string> {
   const existing = await loadBillingUser(db, user.id);
-  if (existing?.stripe_customer_id) return existing.stripe_customer_id;
-  const customer = await stripe.customers.create({ metadata: { brainstormUserId: user.id } });
+  if (existing?.stripe_customer_id) {
+    try {
+      const remote = await stripe.customers.retrieve(existing.stripe_customer_id);
+      if (!("deleted" in remote && remote.deleted)) return existing.stripe_customer_id;
+    } catch (err) {
+      if (!isStripeMissingResource(err)) throwStripe(err);
+    }
+    await db.prepare("UPDATE wallet_users SET stripe_customer_id = NULL WHERE id = ?").bind(user.id).run();
+  }
+  const customer = await stripe.customers.create({
+    metadata: { brainstormUserId: user.id },
+    email: user.email ?? undefined,
+    name: user.displayName ?? undefined,
+  });
   await upsertSubscription(db, { userId: user.id, customerId: customer.id });
   return customer.id;
+}
+
+function throwStripe(err: unknown): never {
+  const message = stripeErrorMessage(err);
+  if (message) throw new HttpError(502, message);
+  throw err;
 }
 
 async function fulfillPaidCheckout(db: D1Database, checkout: Stripe.Checkout.Session): Promise<void> {
@@ -225,7 +245,7 @@ export function registerBillingRoutes(api: App): void {
     if (isArchiveActive(existing?.stripe_status)) {
       return c.json({ url: `${siteOrigin(c.req.raw)}${APP_PREFIX}/billing`, alreadyActive: true });
     }
-    const customerId = await ensureCustomer(c.env.DB, stripe, user);
+    const customerId = await ensureCustomer(c.env.DB, stripe, user).catch(throwStripe);
     const origin = siteOrigin(c.req.raw);
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -238,7 +258,7 @@ export function registerBillingRoutes(api: App): void {
       metadata: { kind: "archive", brainstormUserId: user.id },
       subscription_data: { metadata: { brainstormUserId: user.id, kind: "archive" } },
       integration_identifier: integrationIdentifier("brainstorm_archive"),
-    });
+    }).catch(throwStripe);
     if (!session.url) throw new HttpError(502, "Stripe did not return a checkout URL");
     return c.json({ url: session.url });
   });
@@ -260,7 +280,7 @@ export function registerBillingRoutes(api: App): void {
       user.id === sessionRow.owner_user_id || (token ? timingSafeEqualStr(token, sessionRow.edit_token) : false);
     if (!canEdit) throw new HttpError(403, "Edit access required to feature this board");
     const stripe = stripeClient(env);
-    const customerId = await ensureCustomer(c.env.DB, stripe, user);
+    const customerId = await ensureCustomer(c.env.DB, stripe, user).catch(throwStripe);
     const origin = siteOrigin(c.req.raw);
     const checkout = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -283,7 +303,7 @@ export function registerBillingRoutes(api: App): void {
       cancel_url: `${origin}${APP_PREFIX}/s/${slug}?feature=cancel`,
       metadata: { kind: "feature", slug, brainstormUserId: user.id },
       integration_identifier: integrationIdentifier("brainstorm_feature"),
-    });
+    }).catch(throwStripe);
     if (!checkout.url) throw new HttpError(502, "Stripe did not return a checkout URL");
     return c.json({ url: checkout.url });
   });
@@ -308,7 +328,7 @@ export function registerBillingRoutes(api: App): void {
     const sessionRow = await c.env.DB.prepare("SELECT id FROM sessions WHERE slug = ?").bind(slug).first();
     if (!sessionRow) throw new HttpError(404, "Session not found");
     const stripe = stripeClient(env);
-    const customerId = await ensureCustomer(c.env.DB, stripe, user);
+    const customerId = await ensureCustomer(c.env.DB, stripe, user).catch(throwStripe);
     const origin = siteOrigin(c.req.raw);
     const usdCents = usd * 100;
     const checkout = await stripe.checkout.sessions.create({
@@ -339,7 +359,7 @@ export function registerBillingRoutes(api: App): void {
         brainstormUserId: user.id,
       },
       integration_identifier: integrationIdentifier("brainstorm_boost"),
-    });
+    }).catch(throwStripe);
     if (!checkout.url) throw new HttpError(502, "Stripe did not return a checkout URL");
     return c.json({ url: checkout.url });
   });
@@ -390,10 +410,22 @@ export function registerBillingRoutes(api: App): void {
     assertLiveOnProduction(c, c.env as BillingEnv);
     const stripe = stripeClient(c.env as BillingEnv);
     const origin = siteOrigin(c.req.raw);
+    let customerId = row.stripe_customer_id;
+    try {
+      const remote = await stripe.customers.retrieve(customerId);
+      if ("deleted" in remote && remote.deleted) throw new HttpError(400, "Subscribe again to open the billing portal");
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      if (isStripeMissingResource(err)) {
+        await c.env.DB.prepare("UPDATE wallet_users SET stripe_customer_id = NULL WHERE id = ?").bind(user.id).run();
+        throw new HttpError(400, "Subscribe again to open the billing portal");
+      }
+      throwStripe(err);
+    }
     const portal = await stripe.billingPortal.sessions.create({
-      customer: row.stripe_customer_id,
+      customer: customerId,
       return_url: `${origin}${APP_PREFIX}/billing`,
-    });
+    }).catch(throwStripe);
     return c.json({ url: portal.url });
   });
 

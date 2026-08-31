@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { archiveLineItems, checkoutKind, featureWindowMs, isArchiveActive, nftOriginFromTxid, productionRequiresLiveStripe, stripeKeyLivemode } from "../worker/billing-lib";
+import { archiveLineItems, checkoutKind, featureWindowMs, isArchiveActive, isStripeMissingResource, nftOriginFromTxid, productionRequiresLiveStripe, stripeErrorMessage, stripeKeyLivemode } from "../worker/billing-lib";
 import { boostUsdToCents } from "../worker/commerce";
 import { authorKind, authorKindLabel, heatIntensity, ideaHeat, SITE_AGENT_PUBKEY } from "../worker/identity";
 
@@ -61,6 +61,17 @@ describe("identity and heat", () => {
     expect(ideaHeat(10, 500)).toBe(5010);
     expect(heatIntensity(5000)).toBe(1);
     expect(heatIntensity(0)).toBe(0);
+  });
+});
+
+describe("stale Stripe customer ids", () => {
+  it("detects resource_missing from a leftover test-mode customer", () => {
+    expect(isStripeMissingResource({ code: "resource_missing", message: "No such customer: 'cus_test'" })).toBe(true);
+    expect(isStripeMissingResource({ message: "No such customer: 'cus_x'" })).toBe(true);
+    expect(isStripeMissingResource({ message: "card declined" })).toBe(false);
+    expect(stripeErrorMessage({ type: "StripeInvalidRequestError", message: "No such customer: 'cus_x'" })).toContain(
+      "No such customer",
+    );
   });
 });
 
