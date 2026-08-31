@@ -4,6 +4,8 @@ export type WalletUser = {
   address: string | null;
   handle: string | null;
   displayName: string | null;
+  /** Cookie identity minted without Yours Wallet. */
+  isGuest: boolean;
 };
 
 export type SessionRow = {
@@ -65,12 +67,23 @@ export type PublicSession = Omit<SessionRow, "view_token" | "edit_token"> & {
   isOwner: boolean;
 };
 
+export type SessionNft = {
+  id: string;
+  origin: string;
+  txid: string;
+  contentHash: string;
+  contentType: string;
+  mintedBy: string;
+  createdAt: number;
+};
+
 export type SessionGraph = {
   session: PublicSession;
   ideas: IdeaRow[];
   comments: CommentRow[];
   edges: EdgeRow[];
   myVotes: { targetType: "idea" | "comment"; targetId: string; satoshis: number }[];
+  nfts: SessionNft[];
 };
 
 export class HttpError extends Error {

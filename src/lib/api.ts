@@ -52,12 +52,23 @@ export type Edge = {
   label: string | null;
 };
 
+export type SessionNft = {
+  id: string;
+  origin: string;
+  txid: string;
+  contentHash: string;
+  contentType: string;
+  mintedBy: string;
+  createdAt: number;
+};
+
 export type SessionGraph = {
   session: PublicSession;
   ideas: Idea[];
   comments: Comment[];
   edges: Edge[];
   myVotes: { targetType: "idea" | "comment"; targetId: string; satoshis: number }[];
+  nfts: SessionNft[];
 };
 
 const TOKEN_KEY = (slug: string) => `brainstorm:session:${slug}`;
@@ -105,7 +116,7 @@ function tokenFromUrl(): string | null {
 }
 
 import { apiUrl } from "./base-path";
-import { getBearerToken } from "./auth";
+import { getBearerToken, refreshSession, setBearerToken } from "./auth";
 
 export async function apiFetch<T>(path: string, init?: RequestInit, slug?: string): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -115,6 +126,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit, slug?: strin
   if (token) headers.set("X-Token", token);
   if (init?.body && !headers.has("content-type")) headers.set("content-type", "application/json");
   const res = await fetch(apiUrl(path), { ...init, headers, credentials: "include" });
+  const minted = res.headers.get("x-session-token");
+  if (minted) {
+    setBearerToken(minted);
+    void refreshSession();
+  }
   if (res.headers.get("content-type")?.includes("text/markdown") || res.headers.get("content-type")?.includes("text/html")) {
     return res as unknown as T;
   }

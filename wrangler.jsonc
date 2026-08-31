@@ -20,6 +20,10 @@
     "html_handling": "none",
     "run_worker_first": true
   },
+  "vars": {
+    "STRIPE_PRICE_ID": "price_1UAcKDAM3UEsVBQxvGpZTh1C",
+    "STRIPE_PUBLISHABLE_KEY": "pk_test_51UAbgbAM3UEsVBQxqC4aOf32Z6gMQSiQ7KI3maRO3X9bRRW9agrgjgqvvE0uLG98LEhRWPA2JHkfB7JDHqqcZFUL00k1TczW1Z"
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

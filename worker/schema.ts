@@ -88,7 +88,24 @@ CREATE TABLE IF NOT EXISTS votes (
   UNIQUE (user_id, target_type, target_id)
 );
 CREATE INDEX IF NOT EXISTS idx_votes_target ON votes (target_type, target_id);
+CREATE TABLE IF NOT EXISTS nfts (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  origin TEXT NOT NULL,
+  txid TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  minted_by TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nfts_session ON nfts (session_id, created_at);
 `;
+
+const BILLING_ALTERS = [
+  "ALTER TABLE wallet_users ADD COLUMN stripe_customer_id TEXT",
+  "ALTER TABLE wallet_users ADD COLUMN stripe_subscription_id TEXT",
+  "ALTER TABLE wallet_users ADD COLUMN stripe_status TEXT",
+];
 
 let ready = false;
 
@@ -100,5 +117,13 @@ export async function ensureSchema(db: D1Database): Promise<void> {
     .filter(Boolean)
     .map((s) => db.prepare(s));
   await db.batch(statements);
+  for (const sql of BILLING_ALTERS) {
+    try {
+      await db.prepare(sql).run();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/duplicate column/i.test(message)) throw err;
+    }
+  }
   ready = true;
 }

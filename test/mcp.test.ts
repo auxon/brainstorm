@@ -72,6 +72,7 @@ const graph: SessionGraph = {
   ],
   edges: [{ id: "e1", session_id: "s", source_id: "root", target_id: "child", label: "leads to" }],
   myVotes: [{ targetType: "idea", targetId: "root", satoshis: 100 }],
+  nfts: [],
 };
 
 describe("isMcpPath", () => {
@@ -175,7 +176,7 @@ describe("handleMcp", () => {
     };
     expect(rpc.error).toBeUndefined();
     expect(rpc.result?.serverInfo?.name).toBe("brainstorm");
-    expect(rpc.result?.instructions).toContain("Yours Wallet");
+    expect(rpc.result?.instructions).toContain("site wallet");
   });
 
   it("lists the registered tools", async () => {

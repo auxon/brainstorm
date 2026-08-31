@@ -12,7 +12,12 @@ export function Header() {
             EntangleIT
           </span>
         </Link>
-        <WalletButton />
+        <div className="flex items-center gap-2">
+          <Link to="/billing" className="hidden text-xs text-muted hover:text-fg sm:inline">
+            Archive
+          </Link>
+          <WalletButton />
+        </div>
       </div>
     </header>
   );
@@ -24,10 +29,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <Header />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
       <footer className="border-t border-border py-6 text-center text-xs text-muted">
-        Brainstorm · {BASE_PATH} · sign in with{" "}
-        <a href="https://yours.org" className="text-accent hover:underline" target="_blank" rel="noreferrer">
-          Yours Wallet
-        </a>
+        Brainstorm · {BASE_PATH} · Archive NFTs minted by the site wallet
       </footer>
     </div>
   );

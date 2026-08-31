@@ -6,6 +6,7 @@ import { IdeaBoard } from "@/components/IdeaBoard";
 import { MindMap } from "@/components/MindMap";
 import { ShareDialog } from "@/components/ShareDialog";
 import { ExportMenu } from "@/components/ExportMenu";
+import { MintNftButton } from "@/components/MintNftButton";
 import { apiFetch, rememberSession, saveEditToken, type SessionGraph } from "@/lib/api";
 import { wsUrl } from "@/lib/base-path";
 import { cn } from "@/lib/format";
@@ -97,6 +98,7 @@ export function SessionPage() {
             <Share2 className="size-3.5" /> Share
           </button>
           <ExportMenu slug={slug} />
+          <MintNftButton slug={slug} graph={graph} onUpdate={setGraph} />
         </div>
       </div>
       <div className="mt-6">
