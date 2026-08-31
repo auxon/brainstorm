@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0f14;
+  --color-fg: #e8eef5;
+  --color-muted: #8b9bb0;
+  --color-accent: #2ee6c8;
+  --color-raised: #141b24;
+  --color-border: #243042;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.react-flow__attribution {
+  display: none;
+}
