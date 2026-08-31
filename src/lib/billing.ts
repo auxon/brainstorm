@@ -1,3 +1,7 @@
+export const FEATURE_USD = 29;
+export const FEATURE_DAYS = 7;
+export const BOOST_USD = [1, 3, 5] as const;
+
 export type BillingStatus = {
   configured: boolean;
   publishableKey: string | null;
@@ -8,6 +12,10 @@ export type BillingStatus = {
   status: string | null;
   active: boolean;
   hasCustomer: boolean;
+  payments?: boolean;
+  featureUsd?: number;
+  featureDays?: number;
+  boosts?: number[];
   siteWallet?: {
     configured: boolean;
     address: string | null;

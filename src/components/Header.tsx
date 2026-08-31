@@ -13,6 +13,9 @@ export function Header() {
           </span>
         </Link>
         <div className="flex items-center gap-2">
+          <Link to="/explore" className="hidden text-xs text-muted hover:text-fg sm:inline">
+            Explore
+          </Link>
           <Link to="/billing" className="hidden text-xs text-muted hover:text-fg sm:inline">
             Archive
           </Link>
@@ -29,7 +32,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <Header />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
       <footer className="border-t border-border py-6 text-center text-xs text-muted">
-        Brainstorm · {BASE_PATH} · Archive NFTs minted by the site wallet
+        Brainstorm · {BASE_PATH} · Featured $29/7d · Archive NFTs minted by the site wallet
       </footer>
     </div>
   );

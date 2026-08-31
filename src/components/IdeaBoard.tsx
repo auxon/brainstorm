@@ -3,7 +3,18 @@ import { MessageSquare, Plus, Trash2 } from "lucide-react";
 import type { Comment, Idea, SessionGraph } from "@/lib/api";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
+import { heatIntensity, ideaHeat } from "@/lib/identity";
+import { AuthorBadge } from "./AuthorBadge";
 import { VoteButton } from "./VoteButton";
+
+function heatStyle(satoshis: number, usdCents: number): React.CSSProperties {
+  const t = heatIntensity(ideaHeat(satoshis, usdCents));
+  if (t <= 0) return {};
+  return {
+    boxShadow: `0 0 ${8 + t * 28}px rgba(46, 230, 200, ${0.12 + t * 0.45})`,
+    borderColor: `rgba(46, 230, 200, ${0.28 + t * 0.55})`,
+  };
+}
 
 export function IdeaBoard({
   graph,
@@ -57,14 +68,14 @@ function IdeaCard({
   return (
     <article
       className="rounded-xl border border-border bg-raised p-4"
-      style={{ marginLeft: depth ? Math.min(depth, 4) * 12 : 0 }}
+      style={{ marginLeft: depth ? Math.min(depth, 4) * 12 : 0, ...heatStyle(idea.satoshis, idea.usd_cents ?? 0) }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-base font-medium text-fg">{idea.title}</h3>
           {idea.body ? <p className="mt-1 whitespace-pre-wrap text-sm text-muted">{idea.body}</p> : null}
           <p className="mt-2 text-[11px] text-muted">
-            {idea.author_name}
+            <AuthorBadge userId={idea.author_user_id} name={idea.author_name} />
             {kids.length ? (
               <button type="button" className="ml-2 hover:text-fg" onClick={() => setOpen((v) => !v)}>
                 {open ? "Hide" : "Show"} {kids.length} nested
@@ -80,6 +91,7 @@ function IdeaCard({
             targetId={idea.id}
             voteCount={idea.vote_count}
             satoshis={idea.satoshis}
+            usdCents={idea.usd_cents ?? 0}
             payAddress={idea.author_address}
             onUpdate={onUpdate}
           />
@@ -140,7 +152,9 @@ function CommentRow({
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg bg-bg/60 px-3 py-2">
       <p className="text-sm text-fg">
-        <span className="font-medium">{comment.author_name}</span>{" "}
+        <span className="font-medium">
+          <AuthorBadge userId={comment.author_user_id} name={comment.author_name} />
+        </span>{" "}
         <span className="text-muted">{comment.body}</span>
       </p>
       <VoteButton
@@ -150,6 +164,7 @@ function CommentRow({
         targetId={comment.id}
         voteCount={comment.vote_count}
         satoshis={comment.satoshis}
+        usdCents={comment.usd_cents ?? 0}
         payAddress={comment.author_address}
         onUpdate={onUpdate}
       />

@@ -23,6 +23,7 @@ import { ensureSchema } from "./schema";
 import { registerBillingRoutes, transferBilling, userHasArchive } from "./billing";
 import { NFT_CONTENT_TYPE, NFT_MAX_BYTES, nftOriginFromTxid, type BillingEnv } from "./billing-lib";
 import { inscribeMarkdown } from "./site-wallet";
+import { activeFeaturedUntil } from "./commerce";
 import type { CommentRow, EdgeRow, IdeaRow, SessionGraph, SessionNft, SessionRow, WalletUser } from "./types";
 import { HttpError } from "./types";
 
@@ -44,6 +45,84 @@ api.onError((err, c) => {
 });
 
 api.get("/health", (c) => c.json({ ok: true, service: "brainstorm" }));
+
+api.get("/explore", async (c) => {
+  const now = Date.now();
+  const featured = await c.env.DB.prepare(
+    `SELECT s.id, s.slug, s.title, s.description, s.visibility, s.owner_user_id, s.created_at, s.updated_at,
+            MAX(f.ends_at) as featured_until,
+            (SELECT COUNT(*) FROM ideas i WHERE i.session_id = s.id) as idea_count
+     FROM featured f JOIN sessions s ON s.id = f.session_id
+     WHERE f.ends_at > ? AND s.visibility = 'public'
+     GROUP BY s.id
+     ORDER BY featured_until DESC
+     LIMIT 24`,
+  )
+    .bind(now)
+    .all<{
+      id: string;
+      slug: string;
+      title: string;
+      description: string | null;
+      visibility: "unlisted" | "public" | "token";
+      owner_user_id: string;
+      created_at: number;
+      updated_at: number;
+      featured_until: number;
+      idea_count: number;
+    }>()
+    .then((r) => r.results ?? [])
+    .catch(() => [] as never[]);
+  const featuredIds = new Set(featured.map((s) => s.id));
+  const recent = await c.env.DB.prepare(
+    `SELECT id, slug, title, description, visibility, owner_user_id, created_at, updated_at,
+            (SELECT COUNT(*) FROM ideas i WHERE i.session_id = sessions.id) as idea_count
+     FROM sessions WHERE visibility = 'public' ORDER BY updated_at DESC LIMIT 40`,
+  )
+    .all<{
+      id: string;
+      slug: string;
+      title: string;
+      description: string | null;
+      visibility: "unlisted" | "public" | "token";
+      owner_user_id: string;
+      created_at: number;
+      updated_at: number;
+      idea_count: number;
+    }>()
+    .then((r) => r.results ?? []);
+  const toCard = (
+    s: {
+      id: string;
+      slug: string;
+      title: string;
+      description: string | null;
+      visibility: "unlisted" | "public" | "token";
+      owner_user_id: string;
+      created_at: number;
+      updated_at: number;
+      featured_until?: number;
+      idea_count?: number;
+    },
+    featuredUntil: number | null,
+  ) => ({
+    ...toPublic(
+      {
+        ...s,
+        view_token: "",
+        edit_token: "",
+      },
+      null,
+      false,
+      featuredUntil,
+    ),
+    ideaCount: s.idea_count ?? 0,
+  });
+  return c.json({
+    featured: featured.map((s) => toCard(s, s.featured_until)),
+    public: recent.filter((s) => !featuredIds.has(s.id)).map((s) => toCard(s, null)),
+  });
+});
 
 // ── Wallet auth (SatPress-compatible challenge / BSM / session) ─────────────
 
@@ -295,10 +374,10 @@ api.post("/sessions/:slug/votes", async (c) => {
   const satoshis = Number.isFinite(Number(body.satoshis)) ? Math.max(0, Math.floor(Number(body.satoshis))) : 0;
   const txid = typeof body.txid === "string" ? body.txid : null;
   const existing = await c.env.DB.prepare(
-    "SELECT id, satoshis FROM votes WHERE user_id = ? AND target_type = ? AND target_id = ?",
+    "SELECT id, satoshis, usd_cents FROM votes WHERE user_id = ? AND target_type = ? AND target_id = ?",
   )
     .bind(user.id, targetType, targetId)
-    .first<{ id: string; satoshis: number }>();
+    .first<{ id: string; satoshis: number; usd_cents?: number }>();
 
   const table = targetType === "idea" ? "ideas" : "comments";
 
@@ -317,10 +396,13 @@ api.post("/sessions/:slug/votes", async (c) => {
     }
     await c.env.DB.prepare(`UPDATE ${table} SET satoshis = satoshis + ? WHERE id = ?`).bind(satoshis, targetId).run();
   } else if (existing) {
-    await c.env.DB.prepare("DELETE FROM votes WHERE id = ?").bind(existing.id).run();
-    await c.env.DB.prepare(`UPDATE ${table} SET vote_count = MAX(vote_count - 1, 0) WHERE id = ?`)
-      .bind(targetId)
-      .run();
+    const paid = (existing.satoshis || 0) > 0 || (existing.usd_cents || 0) > 0;
+    if (!paid) {
+      await c.env.DB.prepare("DELETE FROM votes WHERE id = ?").bind(existing.id).run();
+      await c.env.DB.prepare(`UPDATE ${table} SET vote_count = MAX(vote_count - 1, 0) WHERE id = ?`)
+        .bind(targetId)
+        .run();
+    }
   } else {
     await c.env.DB.prepare(
       "INSERT INTO votes (id, session_id, target_type, target_id, user_id, satoshis, txid, created_at) VALUES (?, ?, ?, ?, ?, 0, NULL, ?)",
@@ -496,7 +578,12 @@ function canEdit(session: SessionRow, token: string | null, user: WalletUser | n
   return timingSafeEqualStr(token, session.edit_token);
 }
 
-function toPublic(session: SessionRow, user: WalletUser | null, edit: boolean) {
+function toPublic(
+  session: SessionRow,
+  user: WalletUser | null,
+  edit: boolean,
+  featuredUntil: number | null = null,
+) {
   return {
     id: session.id,
     slug: session.slug,
@@ -508,6 +595,7 @@ function toPublic(session: SessionRow, user: WalletUser | null, edit: boolean) {
     updated_at: session.updated_at,
     canEdit: edit,
     isOwner: Boolean(user && user.id === session.owner_user_id),
+    featuredUntil,
   };
 }
 
@@ -539,6 +627,7 @@ async function loadGraph(
   if (!canView(session, token)) throw new HttpError(403, "This session requires a view link");
   const edit = canEdit(session, token, user);
   if (opts.requireEdit && !edit) throw new HttpError(403, "Edit access required");
+  const featuredUntil = await activeFeaturedUntil(c.env.DB, session.id).catch(() => null);
 
   const [ideas, comments, edges, votes, nfts] = await Promise.all([
     listIdeas(c.env.DB, session.id),
@@ -566,7 +655,7 @@ async function loadGraph(
   ]);
 
   return {
-    session: toPublic(session, user, edit),
+    session: toPublic(session, user, edit, featuredUntil),
     ideas,
     comments,
     edges,

@@ -16,16 +16,28 @@ import "@xyflow/react/dist/style.css";
 import type { Idea, SessionGraph } from "@/lib/api";
 import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
+import { formatUsd } from "@/lib/format";
+import { heatIntensity, ideaHeat } from "@/lib/identity";
 
-type IdeaNode = Node<{ title: string; votes: number; sats: number }, "idea">;
+type IdeaNode = Node<{ title: string; votes: number; sats: number; usd: number; heat: number }, "idea">;
 
 function IdeaNodeView({ data }: NodeProps<IdeaNode>) {
+  const t = heatIntensity(data.heat);
   return (
-    <div className="min-w-[160px] max-w-[220px] rounded-xl border border-accent/30 bg-[#141b24] px-3 py-2 shadow-lg">
+    <div
+      className="min-w-[160px] max-w-[220px] rounded-xl border border-accent/30 bg-[#141b24] px-3 py-2 shadow-lg"
+      style={{
+        transform: `scale(${1 + t * 0.18})`,
+        boxShadow: t > 0 ? `0 0 ${10 + t * 28}px rgba(46, 230, 200, ${0.15 + t * 0.5})` : undefined,
+        borderColor: t > 0 ? `rgba(46, 230, 200, ${0.3 + t * 0.55})` : undefined,
+      }}
+    >
       <Handle type="target" position={Position.Left} className="!bg-accent" />
       <p className="text-sm font-medium text-fg">{data.title}</p>
       <p className="mt-1 font-mono text-[10px] text-muted">
-        {data.votes} ↑{data.sats ? ` · ${data.sats} sats` : ""}
+        {data.votes} ↑
+        {data.sats ? ` · ${data.sats} sats` : ""}
+        {data.usd ? ` · ${formatUsd(data.usd)}` : ""}
       </p>
       <Handle type="source" position={Position.Right} className="!bg-accent" />
     </div>
@@ -77,7 +89,13 @@ export function MindMap({
         id: idea.id,
         type: "idea",
         position: positions.get(idea.id) ?? { x: 0, y: 0 },
-        data: { title: idea.title, votes: idea.vote_count, sats: idea.satoshis },
+        data: {
+          title: idea.title,
+          votes: idea.vote_count,
+          sats: idea.satoshis,
+          usd: idea.usd_cents ?? 0,
+          heat: ideaHeat(idea.satoshis, idea.usd_cents ?? 0),
+        },
         draggable: graph.session.canEdit,
       })),
     [graph.ideas, graph.session.canEdit, positions],

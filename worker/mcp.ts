@@ -33,8 +33,11 @@ export const MCP_TOOLS = [
   "idea_comment",
   "vote",
   "export_session",
+  "explore",
   "billing_status",
   "billing_checkout",
+  "billing_feature",
+  "billing_boost",
   "nft_prepare",
   "nft_mint",
   "nft_record",
@@ -50,6 +53,8 @@ export const MCP_INSTRUCTIONS = [
   "session_create returns editToken once — store it and pass as editToken to post ideas.",
   "The session owner may omit editToken. View-only session_get does not need a token for unlisted/public boards.",
   "vote records an upvote. Sat boosts from a personal wallet still use yours-agent send_bsv then vote with satoshis and txid.",
+  "USD boosts ($1 / $3 / $5) use billing_boost — Stripe Checkout URL, platform keeps USD. Do not drain the site wallet to pay authors.",
+  "Featured boards ($29 / 7 days) use billing_feature (edit access required). explore lists featured + public boards.",
   "Archive ($9/mo Stripe) unlocks minting. billing_checkout returns a Checkout URL (human pays in a browser). nft_mint inscribes via the Brainstorm site wallet — do not use Yours in the browser.",
 ].join("\n");
 
@@ -398,6 +403,20 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
   );
 
   server.registerTool(
+    "explore",
+    {
+      title: "Explore public boards",
+      description: "List featured ($29 / 7 days) and recent public boards.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const { status, json } = await call("GET", "/explore");
+      if (status >= 400) return fail(status, json);
+      return ok(json);
+    },
+  );
+
+  server.registerTool(
     "billing_status",
     {
       title: "Billing status",
@@ -421,6 +440,53 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     },
     async ({ token }) => {
       const { status, json } = await call("POST", "/billing/checkout", { token });
+      if (status >= 400) return fail(status, json);
+      return ok(json);
+    },
+  );
+
+  server.registerTool(
+    "billing_feature",
+    {
+      title: "Feature board Checkout",
+      description:
+        "Create a Stripe Checkout URL ($29) to pin a board on /explore for 7 days. Requires edit access. A human must complete payment in the browser. Makes the board public.",
+      inputSchema: z.object({
+        slug: slugField,
+        token: tokenField.optional(),
+        editToken: editTokenField,
+      }),
+    },
+    async ({ slug, token, editToken }) => {
+      const { status, json } = await call("POST", "/billing/feature", {
+        token,
+        editToken,
+        body: { slug },
+      });
+      if (status >= 400) return fail(status, json);
+      return ok(json);
+    },
+  );
+
+  server.registerTool(
+    "billing_boost",
+    {
+      title: "USD boost Checkout",
+      description:
+        "Create a Stripe Checkout URL for a $1, $3, or $5 idea/comment boost. Platform keeps USD. A human must complete payment in the browser. Token optional.",
+      inputSchema: z.object({
+        slug: slugField,
+        token: tokenField.optional(),
+        targetType: z.enum(["idea", "comment"]),
+        targetId: z.string(),
+        usd: z.number().describe("$1, $3, or $5"),
+      }),
+    },
+    async ({ slug, token, targetType, targetId, usd }) => {
+      const { status, json } = await call("POST", "/billing/boost", {
+        token,
+        body: { slug, targetType, targetId, usd },
+      });
       if (status >= 400) return fail(status, json);
       return ok(json);
     },
