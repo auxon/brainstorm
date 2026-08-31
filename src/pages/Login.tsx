@@ -35,11 +35,12 @@ export function LoginPage() {
   return (
     <Shell>
       <div className="mx-auto max-w-md">
-        <p className="text-xs uppercase tracking-[0.2em] text-muted">Account</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">Sign in with Yours Wallet</h1>
+        <p className="text-xs uppercase tracking-[0.2em] text-muted">Optional</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight">BSV wallet (optional)</h1>
         <p className="mt-3 text-muted">
-          Brainstorm binds your ideas, comments, and upvotes to your BSV identity — no email or
-          password. Connect the extension, then approve a sign-in message (no transaction, no fee).
+          Boards, votes, Archive subscriptions, and NFT mints work without a wallet. Connect Yours only
+          if you want a BSV identity and to boost ideas with sats from your own keys. The site wallet
+          holds the treasury that inscribes Archive NFTs.
         </p>
         <button
           type="button"
@@ -48,7 +49,7 @@ export function LoginPage() {
           className="mt-8 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-medium text-bg disabled:opacity-50"
         >
           <Wallet className="size-4" strokeWidth={1.8} />
-          {busy ? (note ?? "Signing in…") : session ? "Sign signature to continue" : "Sign in with Yours Wallet"}
+          {busy ? (note ?? "Signing in…") : session ? "Sign signature to continue" : "Connect Yours Wallet"}
         </button>
         {status === "missing" ? (
           <p className="mt-3 text-sm text-muted">
@@ -56,7 +57,7 @@ export function LoginPage() {
             <a href={YOURS_CHROME} className="text-accent hover:underline" target="_blank" rel="noreferrer">
               Install it in Chrome
             </a>
-            , then reload. Learn more at{" "}
+            {" "}only if you want sat boosts. Learn more at{" "}
             <a href={YOURS_SITE} className="text-accent hover:underline" target="_blank" rel="noreferrer">
               yours.org
             </a>
@@ -66,7 +67,7 @@ export function LoginPage() {
           <ol className="mt-6 space-y-2 text-sm text-muted">
             <li>1. Connect Yours Wallet (unlock the extension if needed)</li>
             <li>2. Approve the sign-in message — no sats leave the wallet</li>
-            <li>3. Upvote ideas, boost with sats, and share mind maps</li>
+            <li>3. Boost ideas from your own keys; Archive mints still use the site wallet</li>
           </ol>
         )}
         <p className="mt-8 text-sm text-muted">

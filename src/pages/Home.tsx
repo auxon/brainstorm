@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Shell } from "@/components/Header";
 import { apiFetch, listRecent, rememberSession, saveEditToken, type PublicSession } from "@/lib/api";
-import { useSession } from "@/lib/auth";
+import { refreshSession, useSession } from "@/lib/auth";
 
 export function HomePage() {
   const { user, isPending } = useSession();
@@ -15,19 +15,17 @@ export function HomePage() {
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
-    if (!user) {
-      navigate("/login");
-      return;
-    }
     if (!title.trim()) return;
     setBusy(true);
     try {
       const created = await apiFetch<{
         session: PublicSession;
         editToken: string;
+        token?: string | null;
       }>("/sessions", { method: "POST", body: JSON.stringify({ title: title.trim(), description }) });
       saveEditToken(created.session.slug, created.editToken);
       rememberSession(created.session.slug, created.session.title);
+      await refreshSession();
       navigate(`/s/${created.session.slug}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not create session");
@@ -42,12 +40,13 @@ export function HomePage() {
         <p className="text-xs uppercase tracking-[0.2em] text-muted">EntangleIT</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">Post ideas. Map them. Share the session.</h1>
         <p className="mt-3 text-muted">
-          Sign in with Yours Wallet to create a board, upvote ideas and comments, and optionally boost
-          with sats. Export any session to Markdown or HTML.{" "}
+          No wallet required. Create a board, nest ideas, upvote, and export Markdown or HTML.
+          {" "}
           <Link to="/billing" className="text-accent hover:underline">
             Archive ($9/mo)
           </Link>{" "}
-          mints a board as a 1Sat Ordinal NFT. Agents can use the same API over MCP at{" "}
+          inscribes a board as a 1Sat Ordinal NFT from the Brainstorm site wallet.
+          Agents can use the same API over MCP at{" "}
           <a href="https://entangleit.com/brainstorm/mcp" className="text-accent hover:underline">
             /brainstorm/mcp
           </a>
@@ -72,9 +71,18 @@ export function HomePage() {
             disabled={busy || isPending}
             className="h-11 w-full rounded-lg bg-accent text-sm font-medium text-bg disabled:opacity-60"
           >
-            {user ? (busy ? "Creating…" : "Create session") : "Sign in to create"}
+            {busy ? "Creating…" : "Create session"}
           </button>
         </form>
+        {user?.isGuest ? (
+          <p className="mt-3 text-xs text-muted">
+            You are browsing as Guest.{" "}
+            <Link to="/login" className="text-accent hover:underline">
+              Optional BSV wallet
+            </Link>{" "}
+            is only for sat boosts.
+          </p>
+        ) : null}
         {recent.length ? (
           <section className="mt-10">
             <h2 className="text-sm uppercase tracking-wider text-muted">On this device</h2>

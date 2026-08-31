@@ -35,6 +35,7 @@ export type SessionUser = {
   address?: string | null;
   handle?: string | null;
   displayName?: string | null;
+  isGuest?: boolean;
 };
 
 async function authFetch<T>(action: string, init?: RequestInit): Promise<T> {

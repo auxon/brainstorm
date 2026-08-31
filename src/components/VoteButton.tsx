@@ -35,10 +35,6 @@ export function VoteButton({
   const mine = graph.myVotes.some((v) => v.targetType === targetType && v.targetId === targetId);
 
   async function vote(extraSats = 0, txid: string | null = null) {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
     setBusy(true);
     try {
       const next = await apiFetch<SessionGraph>(
@@ -55,7 +51,7 @@ export function VoteButton({
   }
 
   async function boost(amount: number) {
-    if (!user) {
+    if (!user || user.isGuest) {
       navigate("/login");
       return;
     }
@@ -97,7 +93,7 @@ export function VoteButton({
       {satoshis > 0 ? (
         <span className="font-mono text-[11px] text-accent/80">{formatSats(satoshis)}</span>
       ) : null}
-      {payAddress ? (
+      {payAddress && user && !user.isGuest ? (
         <div className="group relative">
           <button
             type="button"

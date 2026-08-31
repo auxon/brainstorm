@@ -3,10 +3,8 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Diamond } from "lucide-react";
 import { apiFetch, type SessionGraph, type SessionNft } from "@/lib/api";
-import type { BillingStatus, NftPrepare } from "@/lib/billing";
-import { useSession } from "@/lib/auth";
-import { inscribeSessionMarkdown } from "@/lib/inscribe";
-import { ensureYoursConnected } from "@/lib/wallet-store";
+import type { BillingStatus } from "@/lib/billing";
+import { refreshSession } from "@/lib/auth";
 
 export function MintNftButton({
   slug,
@@ -17,16 +15,11 @@ export function MintNftButton({
   graph: SessionGraph;
   onUpdate: (g: SessionGraph) => void;
 }) {
-  const { user } = useSession();
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const latest = graph.nfts[0] as SessionNft | undefined;
 
   async function mint() {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
     if (!graph.session.canEdit) {
       toast.error("You need edit access to mint this session.");
       return;
@@ -39,15 +32,13 @@ export function MintNftButton({
         navigate("/billing");
         return;
       }
-      if (!(await ensureYoursConnected())) throw new Error("Connect Yours Wallet first.");
-      const prep = await apiFetch<NftPrepare>(`/sessions/${slug}/nft/prepare`, { method: "POST" }, slug);
-      toast.message("Approve the inscription in Yours Wallet (1 sat + fees)");
-      const minted = await inscribeSessionMarkdown(prep);
-      const next = await apiFetch<SessionGraph>(
-        `/sessions/${slug}/nft`,
-        { method: "POST", body: JSON.stringify(minted) },
+      toast.message("Inscribing with the Brainstorm site wallet…");
+      const next = await apiFetch<SessionGraph & { txid?: string }>(
+        `/sessions/${slug}/nft/mint`,
+        { method: "POST" },
         slug,
       );
+      await refreshSession();
       onUpdate(next);
       toast.success("Session inscribed as a 1Sat Ordinal");
     } catch (err) {
@@ -68,7 +59,7 @@ export function MintNftButton({
         disabled={busy}
         onClick={() => void mint()}
         className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-raised px-3 text-xs text-muted hover:text-fg disabled:opacity-60"
-        title="Inscribe this session as a 1Sat Ordinal NFT"
+        title="Inscribe this session as a 1Sat Ordinal via the site wallet"
       >
         <Diamond className="size-3.5" strokeWidth={1.8} />
         {busy ? "Minting…" : latest ? "Mint update" : "Mint NFT"}

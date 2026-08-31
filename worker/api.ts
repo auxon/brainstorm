@@ -2,10 +2,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
   assertSameOriginPost,
+  attachSessionCookie,
   buildClearCookie,
   buildSessionCookie,
   displayNameFor,
+  ensureSessionUser,
   getSessionUser,
+  isGuestId,
   issueChallenge,
   purgeExpired,
   requestIsSecure,
@@ -17,8 +20,9 @@ import { renderHtml, renderMarkdown } from "./export";
 import { nanoid, newId, randomToken, sha256Hex, timingSafeEqualStr } from "./ids";
 import { APP_PREFIX } from "./paths";
 import { ensureSchema } from "./schema";
-import { registerBillingRoutes, userHasArchive } from "./billing";
-import { NFT_CONTENT_TYPE, NFT_MAX_BYTES, nftOriginFromTxid } from "./billing-lib";
+import { registerBillingRoutes, transferBilling, userHasArchive } from "./billing";
+import { NFT_CONTENT_TYPE, NFT_MAX_BYTES, nftOriginFromTxid, type BillingEnv } from "./billing-lib";
+import { inscribeMarkdown } from "./site-wallet";
 import type { CommentRow, EdgeRow, IdeaRow, SessionGraph, SessionNft, SessionRow, WalletUser } from "./types";
 import { HttpError } from "./types";
 
@@ -61,6 +65,7 @@ api.post("/wallet-auth/verify", async (c) => {
     }
   }
   c.executionCtx.waitUntil(purgeExpired(c.env.DB));
+  const previous = c.get("user");
   const { token, user } = await verifyChallenge(c.env.DB, {
     nonce: body.nonce as string,
     message: body.message as string,
@@ -69,9 +74,13 @@ api.post("/wallet-auth/verify", async (c) => {
     identityKey: typeof body.identityKey === "string" ? body.identityKey : null,
     address: typeof body.address === "string" ? body.address : null,
   });
+  if (previous && isGuestId(previous.id) && previous.id !== user.id) {
+    await transferBilling(c.env.DB, previous.id, user.id);
+  }
   const secure = requestIsSecure(c.req.raw);
   c.header("set-cookie", buildSessionCookie(token, secure, APP_PREFIX));
   c.header("cache-control", "no-store");
+  c.header("x-session-token", token);
   return c.json({ token, ...user, user });
 });
 
@@ -86,7 +95,7 @@ api.post("/wallet-auth/signout", async (c) => {
 
 api.post("/sessions", async (c) => {
   assertSameOriginPost(c.req.raw);
-  const user = requireUser(c);
+  const { user, mintedToken } = await requireActor(c);
   const body = await readJson(c.req.raw);
   const title = typeof body.title === "string" ? body.title.trim() : "";
   if (!title) throw new HttpError(400, "Title is required");
@@ -115,6 +124,7 @@ api.post("/sessions", async (c) => {
     session: toPublic(session, user, true),
     editToken,
     viewToken,
+    token: mintedToken,
     ideas: await listIdeas(c.env.DB, id),
   });
 });
@@ -146,7 +156,7 @@ api.patch("/sessions/:slug", async (c) => {
 
 api.post("/sessions/:slug/ideas", async (c) => {
   assertSameOriginPost(c.req.raw);
-  const user = requireUser(c);
+  const { user } = await requireActor(c);
   const { session } = await loadGraph(c, { requireEdit: true });
   const body = await readJson(c.req.raw);
   const title = typeof body.title === "string" ? body.title.trim() : "";
@@ -224,7 +234,7 @@ api.delete("/sessions/:slug/ideas/:id", async (c) => {
 
 api.post("/sessions/:slug/ideas/:id/comments", async (c) => {
   assertSameOriginPost(c.req.raw);
-  const user = requireUser(c);
+  const { user } = await requireActor(c);
   const { session } = await loadGraph(c, { requireEdit: true });
   const idea = await getIdea(c.env.DB, c.req.param("id"), session.id);
   const body = await readJson(c.req.raw);
@@ -274,7 +284,7 @@ api.delete("/sessions/:slug/edges/:id", async (c) => {
 
 api.post("/sessions/:slug/votes", async (c) => {
   assertSameOriginPost(c.req.raw);
-  const user = requireUser(c);
+  const { user } = await requireActor(c);
   const { session } = await loadGraph(c);
   const body = await readJson(c.req.raw);
   const targetType = body.targetType === "comment" ? "comment" : body.targetType === "idea" ? "idea" : null;
@@ -347,7 +357,7 @@ api.get("/sessions/:slug/export.html", async (c) => {
 
 api.post("/sessions/:slug/nft/prepare", async (c) => {
   assertSameOriginPost(c.req.raw);
-  const user = requireUser(c);
+  const { user } = await requireActor(c);
   const graph = await loadGraph(c, { requireEdit: true });
   if (!(await userHasArchive(c.env.DB, user.id))) {
     throw new HttpError(402, "Archive subscription required to mint an NFT");
@@ -374,7 +384,7 @@ api.post("/sessions/:slug/nft/prepare", async (c) => {
 
 api.post("/sessions/:slug/nft", async (c) => {
   assertSameOriginPost(c.req.raw);
-  const user = requireUser(c);
+  const { user } = await requireActor(c);
   const graph = await loadGraph(c, { requireEdit: true });
   if (!(await userHasArchive(c.env.DB, user.id))) {
     throw new HttpError(402, "Archive subscription required to mint an NFT");
@@ -404,16 +414,58 @@ api.post("/sessions/:slug/nft", async (c) => {
   return c.json(await loadGraph(c));
 });
 
+api.post("/sessions/:slug/nft/mint", async (c) => {
+  assertSameOriginPost(c.req.raw);
+  const { user } = await requireActor(c);
+  const graph = await loadGraph(c, { requireEdit: true });
+  if (!(await userHasArchive(c.env.DB, user.id))) {
+    throw new HttpError(402, "Archive subscription required to mint an NFT");
+  }
+  const markdown = renderMarkdown(graph);
+  const bytes = new TextEncoder().encode(markdown).byteLength;
+  if (bytes > NFT_MAX_BYTES) throw new HttpError(413, "Session is too large to inscribe in a single ordinal");
+  const contentHash = await sha256Hex(markdown);
+  const minted = await inscribeMarkdown(c.env as BillingEnv, markdown, NFT_CONTENT_TYPE, {
+    app: "brainstorm",
+    type: "brainstorm-session",
+    slug: graph.session.slug,
+    title: graph.session.title,
+    url: `https://entangleit.com/brainstorm/s/${graph.session.slug}`,
+    sha256: contentHash,
+  });
+  const existing = await c.env.DB.prepare("SELECT id FROM nfts WHERE txid = ?").bind(minted.txid).first();
+  if (!existing) {
+    await c.env.DB.prepare(
+      "INSERT INTO nfts (id, session_id, origin, txid, content_hash, content_type, minted_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(newId(), graph.session.id, minted.origin, minted.txid, contentHash, NFT_CONTENT_TYPE, user.id, Date.now())
+      .run();
+  }
+  await touch(c.env.DB, graph.session.id);
+  await broadcast(c, graph.session.id, { type: "nft.mint", txid: minted.txid, origin: minted.origin });
+  const next = await loadGraph(c);
+  return c.json({ ...next, txid: minted.txid, origin: minted.origin, contentHash });
+});
+
 registerBillingRoutes(api);
 
 export { SIGN_TAG };
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-function requireUser(c: { get: (k: "user") => WalletUser | null }): WalletUser {
-  const user = c.get("user");
-  if (!user) throw new HttpError(401, "Unauthorized");
-  return user;
+async function requireActor(c: {
+  get: (k: "user") => WalletUser | null;
+  set: (k: "user", v: WalletUser) => void;
+  env: Env;
+  req: { raw: Request };
+  header: (n: string, v: string) => void;
+}): Promise<{ user: WalletUser; mintedToken: string | null }> {
+  const { user, mintedToken } = await ensureSessionUser(c.env.DB, c.get("user"));
+  if (mintedToken) {
+    c.set("user", user);
+    attachSessionCookie((n, v) => c.header(n, v), c.req.raw, mintedToken);
+  }
+  return { user, mintedToken };
 }
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {

@@ -176,7 +176,7 @@ describe("handleMcp", () => {
     };
     expect(rpc.error).toBeUndefined();
     expect(rpc.result?.serverInfo?.name).toBe("brainstorm");
-    expect(rpc.result?.instructions).toContain("Yours Wallet");
+    expect(rpc.result?.instructions).toContain("site wallet");
   });
 
   it("lists the registered tools", async () => {

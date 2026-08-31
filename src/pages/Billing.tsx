@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { Diamond, ExternalLink } from "lucide-react";
 import { Shell } from "@/components/Header";
 import { apiFetch } from "@/lib/api";
-import { useSession } from "@/lib/auth";
+import { refreshSession, useSession } from "@/lib/auth";
 import type { BillingStatus } from "@/lib/billing";
 
 export function BillingPage() {
-  const { user, isPending } = useSession();
-  const navigate = useNavigate();
+  const { user } = useSession();
   const [params] = useSearchParams();
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,24 +24,36 @@ export function BillingPage() {
   }, [user?.id]);
 
   useEffect(() => {
-    if (params.get("checkout") !== "success") return;
-    toast.success("Thanks — unlocking Archive. This can take a few seconds.");
-    const started = Date.now();
-    const tick = window.setInterval(() => {
-      void refresh()
-        .then((s) => {
-          if (s.active || Date.now() - started > 20_000) window.clearInterval(tick);
-        })
-        .catch(() => undefined);
-    }, 1500);
-    return () => window.clearInterval(tick);
+    const checkout = params.get("checkout");
+    const sessionId = params.get("session_id");
+    if (checkout !== "success") return;
+    let cancelled = false;
+    void (async () => {
+      if (sessionId?.startsWith("cs_")) {
+        try {
+          await apiFetch("/billing/claim", { method: "POST", body: JSON.stringify({ sessionId }) });
+          await refreshSession();
+        } catch {
+          /* webhook may still land */
+        }
+      }
+      toast.success("Thanks — unlocking Archive. This can take a few seconds.");
+      const started = Date.now();
+      const tick = window.setInterval(() => {
+        void refresh()
+          .then((s) => {
+            if (cancelled) return;
+            if (s.active || Date.now() - started > 20_000) window.clearInterval(tick);
+          })
+          .catch(() => undefined);
+      }, 1500);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [params]);
 
   async function checkout() {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
     setBusy(true);
     try {
       const { url } = await apiFetch<{ url: string }>("/billing/checkout", { method: "POST" });
@@ -64,14 +75,18 @@ export function BillingPage() {
     }
   }
 
+  const wallet = status?.siteWallet;
+  const funded = (wallet?.satoshis ?? 0) > 0;
+
   return (
     <Shell>
       <div className="mx-auto max-w-lg">
         <p className="text-xs uppercase tracking-[0.2em] text-muted">Archive</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">Mint a brainstorm as an NFT</h1>
         <p className="mt-3 text-muted">
-          Archive is ${status?.amountUsd ?? 9}/{status?.interval ?? "month"} via Stripe. While it is active you can
-          inscribe any session you can edit as a 1Sat Ordinal — the Markdown snapshot lives on BSV, not just in D1.
+          Archive is ${status?.amountUsd ?? 9}/{status?.interval ?? "month"} via Stripe. No Yours Wallet needed —
+          while Archive is active, the Brainstorm site wallet inscribes any board you can edit as a 1Sat
+          Ordinal. The Markdown snapshot lives on BSV, not just in D1.
         </p>
         <div className="mt-8 rounded-2xl border border-border bg-raised p-5">
           <div className="flex items-center gap-2 text-accent">
@@ -83,16 +98,14 @@ export function BillingPage() {
             <span className="text-base font-normal text-muted">/{status?.interval ?? "month"}</span>
           </p>
           <ul className="mt-4 space-y-2 text-sm text-muted">
-            <li>Inscribe the current board as a 1Sat Ordinal NFT</li>
+            <li>Site wallet mints the current board as a 1Sat Ordinal NFT</li>
             <li>Origin + txid stored on the session</li>
             <li>Cancel anytime in the Stripe customer portal</li>
           </ul>
           {status?.active ? (
             <p className="mt-4 text-sm text-accent">Archive is active{status.status ? ` (${status.status})` : ""}.</p>
           ) : (
-            <p className="mt-4 text-sm text-muted">
-              {isPending ? "Checking wallet…" : user ? "Not subscribed yet." : "Sign in with Yours Wallet to subscribe."}
-            </p>
+            <p className="mt-4 text-sm text-muted">Not subscribed yet. Stripe Checkout collects payment — no browser wallet.</p>
           )}
           <div className="mt-5 flex flex-col gap-2">
             {status?.active ? (
@@ -107,7 +120,7 @@ export function BillingPage() {
             ) : (
               <button
                 type="button"
-                disabled={busy || isPending || !status?.configured}
+                disabled={busy || !status?.configured}
                 onClick={() => void checkout()}
                 className="h-11 rounded-lg bg-accent text-sm font-medium text-bg disabled:opacity-60"
               >
@@ -119,6 +132,22 @@ export function BillingPage() {
             ) : null}
           </div>
         </div>
+        {wallet?.configured ? (
+          <p className="mt-4 text-xs text-muted">
+            Site wallet {funded ? "is funded" : "is waiting for BSV"}
+            {wallet.address ? (
+              <>
+                {" "}
+                at <span className="font-mono break-all">{wallet.address}</span>
+              </>
+            ) : null}
+            {wallet.satoshis != null ? ` · ${wallet.satoshis.toLocaleString()} sats` : null}.
+          </p>
+        ) : (
+          <p className="mt-4 text-xs text-muted">
+            NFT minting waits on a site-wallet WIF secret. Yours Wallet is not required for subscribers.
+          </p>
+        )}
         <p className="mt-6 text-sm text-muted">
           Sales tax / VAT is not collected until Stripe Tax registrations are added in the Dashboard.{" "}
           <Link to="/" className="text-accent hover:underline">

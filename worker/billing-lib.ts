@@ -29,6 +29,8 @@ export type BillingEnv = Env & {
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_PRICE_ID?: string;
   STRIPE_PUBLISHABLE_KEY?: string;
+  /** WIF for the site treasury that inscribes Archive NFTs. Never log this. */
+  SITE_WALLET_WIF?: string;
 };
 
 export function billingConfigured(env: BillingEnv): boolean {

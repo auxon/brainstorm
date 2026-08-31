@@ -3,6 +3,8 @@ import type { Context } from "hono";
 import type { Hono } from "hono";
 import { APP_PREFIX } from "./paths";
 import { HttpError, type WalletUser } from "./types";
+import { attachSessionCookie, ensureSessionUser, isGuestId, mintSessionForUser } from "./auth";
+import { siteWalletStatus } from "./site-wallet";
 import {
   ARCHIVE_AMOUNT_USD,
   ARCHIVE_INTERVAL,
@@ -71,9 +73,31 @@ export async function upsertSubscription(
     .run();
 }
 
-function requireUser(c: Ctx): WalletUser {
-  const user = c.get("user");
-  if (!user) throw new HttpError(401, "Sign in with Yours Wallet first");
+/** Move Archive from a guest cookie onto a Yours identity after optional wallet link. */
+export async function transferBilling(db: D1Database, fromUserId: string, toUserId: string): Promise<void> {
+  if (fromUserId === toUserId) return;
+  const from = await loadBillingUser(db, fromUserId);
+  if (!from?.stripe_customer_id && !from?.stripe_status) return;
+  await db
+    .prepare(
+      "UPDATE wallet_users SET stripe_customer_id = COALESCE(?, stripe_customer_id), stripe_subscription_id = COALESCE(?, stripe_subscription_id), stripe_status = COALESCE(?, stripe_status) WHERE id = ?",
+    )
+    .bind(from.stripe_customer_id, from.stripe_subscription_id, from.stripe_status, toUserId)
+    .run();
+  await db
+    .prepare(
+      "UPDATE wallet_users SET stripe_customer_id = NULL, stripe_subscription_id = NULL, stripe_status = NULL WHERE id = ?",
+    )
+    .bind(fromUserId)
+    .run();
+}
+
+async function requireActor(c: Ctx): Promise<WalletUser> {
+  const { user, mintedToken } = await ensureSessionUser(c.env.DB, c.get("user"));
+  if (mintedToken) {
+    c.set("user", user);
+    attachSessionCookie((n, v) => c.header(n, v), c.req.raw, mintedToken);
+  }
   return user;
 }
 
@@ -89,6 +113,7 @@ export function registerBillingRoutes(api: App): void {
     const configured = billingConfigured(env);
     const user = c.get("user");
     const row = user ? await loadBillingUser(c.env.DB, user.id) : null;
+    const siteWallet = await siteWalletStatus(env);
     return c.json({
       configured,
       publishableKey: configured ? env.STRIPE_PUBLISHABLE_KEY ?? null : null,
@@ -99,11 +124,12 @@ export function registerBillingRoutes(api: App): void {
       status: row?.stripe_status ?? null,
       active: isArchiveActive(row?.stripe_status),
       hasCustomer: Boolean(row?.stripe_customer_id),
+      siteWallet,
     });
   });
 
   api.post("/billing/checkout", async (c) => {
-    const user = requireUser(c);
+    const user = await requireActor(c);
     const env = c.env as BillingEnv;
     if (!billingConfigured(env) || !env.STRIPE_PRICE_ID) {
       throw new HttpError(503, "Billing is not configured");
@@ -129,7 +155,7 @@ export function registerBillingRoutes(api: App): void {
       customer: customerId,
       client_reference_id: user.id,
       line_items: [{ price: env.STRIPE_PRICE_ID, quantity: 1 }],
-      success_url: `${origin}${APP_PREFIX}/billing?checkout=success`,
+      success_url: `${origin}${APP_PREFIX}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}${APP_PREFIX}/billing?checkout=cancel`,
       allow_promotion_codes: true,
       metadata: { brainstormUserId: user.id },
@@ -140,8 +166,49 @@ export function registerBillingRoutes(api: App): void {
     return c.json({ url: session.url });
   });
 
+  api.post("/billing/claim", async (c) => {
+    const env = c.env as BillingEnv;
+    if (!billingConfigured(env)) throw new HttpError(503, "Billing is not configured");
+    const body = (await c.req.json().catch(() => null)) as { sessionId?: string } | null;
+    const sessionId = typeof body?.sessionId === "string" ? body.sessionId.trim() : "";
+    if (!sessionId.startsWith("cs_")) throw new HttpError(400, "Missing Stripe Checkout session id");
+    const stripe = stripeClient(env);
+    const checkout = await stripe.checkout.sessions.retrieve(sessionId);
+    if (checkout.status !== "complete") throw new HttpError(402, "Checkout is not complete yet");
+    const userId =
+      (typeof checkout.client_reference_id === "string" && checkout.client_reference_id) ||
+      (typeof checkout.metadata?.brainstormUserId === "string" && checkout.metadata.brainstormUserId) ||
+      null;
+    const customerId = typeof checkout.customer === "string" ? checkout.customer : checkout.customer?.id ?? null;
+    const subscriptionId =
+      typeof checkout.subscription === "string" ? checkout.subscription : checkout.subscription?.id ?? null;
+    await upsertSubscription(c.env.DB, {
+      userId,
+      customerId,
+      subscriptionId,
+      status: "active",
+    });
+
+    const current = c.get("user");
+    if (!current && userId) {
+      const minted = await mintSessionForUser(c.env.DB, {
+        userId,
+        displayName: isGuestId(userId) ? "Guest" : null,
+      });
+      attachSessionCookie((n, v) => c.header(n, v), c.req.raw, minted.token);
+      c.set("user", minted.user);
+    }
+    const actorId = c.get("user")?.id ?? userId;
+    const row = actorId ? await loadBillingUser(c.env.DB, actorId) : null;
+    return c.json({
+      ok: true,
+      active: isArchiveActive(row?.stripe_status),
+      status: row?.stripe_status ?? "active",
+    });
+  });
+
   api.post("/billing/portal", async (c) => {
-    const user = requireUser(c);
+    const user = await requireActor(c);
     const row = await loadBillingUser(c.env.DB, user.id);
     if (!row?.stripe_customer_id) throw new HttpError(400, "No Stripe customer yet — subscribe first");
     const stripe = stripeClient(c.env as BillingEnv);

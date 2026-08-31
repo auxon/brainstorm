@@ -1,18 +1,17 @@
 /**
- * Yours BRC-100 wallet authentication — Worker side.
+ * Session authentication — Worker side.
  *
- * Same flow as auxon/SatPress:
- *   1. Client asks for a challenge (nonce + origin-bound message).
- *   2. Yours Wallet signs it with `signBsm` and a derivation tag that always
- *      yields the same pubkey for this app.
- *   3. We verify the Bitcoin Signed Message with `@bsv/sdk`, burn the nonce,
- *      and mint an opaque session (httpOnly cookie + body token).
+ * Humans do not need Yours Wallet. The first write mints a guest user
+ * (`g_…`) and an opaque session cookie. Yours remains optional: a BSM
+ * challenge (same flow as auxon/SatPress) upgrades that cookie to a BSV
+ * identity for sat boosts. The site wallet (Worker WIF) is what inscribes NFTs.
  *
- * Identity = compressed signing pubkey hex. Proving the private key IS login.
+ * Wallet identity = compressed signing pubkey hex. Guest identity = `g_` + id.
  */
 import { BSM, PublicKey, Signature, Utils } from "@bsv/sdk";
 import { HttpError, type WalletUser } from "./types";
-import { randomHex, sha256Hex } from "./ids";
+import { nanoid, randomHex, sha256Hex } from "./ids";
+import { APP_PREFIX } from "./paths";
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -123,14 +122,67 @@ export async function mintSessionForUser(
 
   return {
     token,
-    user: {
+    user: toWalletUser({
       id: input.userId,
-      identityKey: input.identityKey ?? null,
+      identity_key: input.identityKey ?? null,
       address: input.address ?? null,
       handle: input.handle ?? null,
-      displayName: input.displayName ?? null,
-    },
+      display_name: input.displayName ?? null,
+    }),
   };
+}
+
+export const GUEST_PREFIX = "g_";
+
+export function isGuestId(id: string): boolean {
+  return id.startsWith(GUEST_PREFIX);
+}
+
+function toWalletUser(row: {
+  id: string;
+  identity_key?: string | null;
+  address?: string | null;
+  handle?: string | null;
+  display_name?: string | null;
+}): WalletUser {
+  return {
+    id: row.id,
+    identityKey: row.identity_key ?? null,
+    address: row.address ?? null,
+    handle: row.handle ?? null,
+    displayName: row.display_name ?? null,
+    isGuest: isGuestId(row.id),
+  };
+}
+
+/** Mint a browser/MCP identity that does not require Yours Wallet. */
+export async function mintGuestUser(
+  db: D1Database,
+  displayName = "Guest",
+): Promise<{ token: string; user: WalletUser }> {
+  return mintSessionForUser(db, {
+    userId: `${GUEST_PREFIX}${nanoid(16)}`,
+    displayName,
+  });
+}
+
+export async function ensureSessionUser(
+  db: D1Database,
+  existing: WalletUser | null,
+): Promise<{ user: WalletUser; mintedToken: string | null }> {
+  if (existing) return { user: existing, mintedToken: null };
+  const minted = await mintGuestUser(db);
+  return { user: minted.user, mintedToken: minted.token };
+}
+
+export function attachSessionCookie(
+  header: (name: string, value: string) => void,
+  request: Request,
+  token: string,
+): void {
+  header("set-cookie", buildSessionCookie(token, requestIsSecure(request), APP_PREFIX));
+  header("cache-control", "no-store");
+  header("x-session-token", token);
 }
 
 export async function verifyChallenge(
@@ -212,13 +264,7 @@ export async function getSessionUser(request: Request, db: D1Database): Promise<
     await db.prepare("DELETE FROM wallet_sessions WHERE token_hash = ?").bind(hash).run();
     return null;
   }
-  return {
-    id: row.id,
-    identityKey: row.identity_key,
-    address: row.address,
-    handle: row.handle,
-    displayName: row.display_name,
-  };
+  return toWalletUser(row);
 }
 
 export async function revokeSession(request: Request, db: D1Database): Promise<void> {
@@ -234,7 +280,10 @@ export async function purgeExpired(db: D1Database): Promise<void> {
 }
 
 export function displayNameFor(user: WalletUser): string {
-  return user.displayName || user.handle || shortKey(user.id);
+  if (user.displayName) return user.displayName;
+  if (user.handle) return user.handle;
+  if (user.isGuest) return "Guest";
+  return shortKey(user.id);
 }
 
 export function shortKey(hex: string, head = 6, tail = 4): string {

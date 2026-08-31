@@ -4,8 +4,10 @@
  * Tools call the existing Hono API in-process (synthetic Request + Bearer /
  * X-Token) so validation, auth, and broadcasts stay in one place.
  *
- * Writes need a Yours Wallet session. Pairing:
- *   auth_challenge → yours-agent sign_message (identity) → auth_verify
+ * Humans on the website do not need Yours Wallet. Agents can:
+ *   - skip pairing: session_create mints a guest identity and returns `token`
+ *   - or pair yours-agent (site wallet / BSV identity):
+ *       auth_challenge → sign_message (identity) → auth_verify
  * session_create returns editToken once; pass it on later writes.
  */
 import { createMcpHandler } from "agents/mcp/server";
@@ -34,22 +36,21 @@ export const MCP_TOOLS = [
   "billing_status",
   "billing_checkout",
   "nft_prepare",
+  "nft_mint",
   "nft_record",
 ] as const;
 
 export const MCP_INSTRUCTIONS = [
   "Brainstorm is a collaborative idea board and mind map.",
   "Public UI: https://entangleit.com/brainstorm/",
-  "Auth is Yours Wallet BSM (same challenge as the website). Pair with yours-agent:",
-  "1) auth_challenge",
-  "2) yours-agent sign_message on the challenge message using the identity key",
-  "3) auth_verify with nonce, message, sig, and pubKey (compressed identity pubkey)",
-  "4) Pass the returned token as `token` on write tools",
+  "Humans do not need Yours Wallet. Guest cookies / session_create tokens are enough for boards, votes, Stripe Archive, and NFT mints.",
+  "Yours is optional and server-side: pair yours-agent only if this agent should use the site BSV identity (sat boosts, funding the treasury).",
+  "Pairing: 1) auth_challenge 2) yours-agent sign_message on the challenge 3) auth_verify 4) pass token on write tools.",
+  "Or skip pairing: session_create without token mints a guest identity and returns token + editToken.",
   "session_create returns editToken once — store it and pass as editToken to post ideas.",
   "The session owner may omit editToken. View-only session_get does not need a token for unlisted/public boards.",
-  "vote records an upvote. For a sat boost, first send BSV with yours-agent send_bsv, then call vote with satoshis and txid.",
-  "This server never sends BSV itself.",
-  "Archive ($9/mo Stripe) unlocks minting a session as a 1Sat Ordinal NFT. billing_checkout returns a Stripe Checkout URL (human completes payment in a browser). nft_prepare + Yours Wallet inscribe + nft_record stores the origin.",
+  "vote records an upvote. Sat boosts from a personal wallet still use yours-agent send_bsv then vote with satoshis and txid.",
+  "Archive ($9/mo Stripe) unlocks minting. billing_checkout returns a Checkout URL (human pays in a browser). nft_mint inscribes via the Brainstorm site wallet — do not use Yours in the browser.",
 ].join("\n");
 
 type ToolResult = {
@@ -245,9 +246,9 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     {
       title: "Create session",
       description:
-        "Create a brainstorm session. Requires a wallet token. Returns editToken once — store it; it is the write capability for this board.",
+        "Create a brainstorm session. Token is optional — omitted mints a guest identity (no Yours Wallet). Returns editToken once — store it; it is the write capability for this board.",
       inputSchema: z.object({
-        token: tokenField,
+        token: tokenField.optional(),
         title: z.string().min(1),
         description: z.string().optional(),
       }),
@@ -269,8 +270,9 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
       return graphOk(status, graph, {
         editToken: created.editToken,
         viewToken: created.viewToken,
+        token: (json as { token?: string }).token,
         url: slug ? sessionUrl(slug) : undefined,
-        note: "Save editToken. It is only returned here. Pass it as editToken on idea_post, idea_comment, and session_update.",
+        note: "Save editToken (write capability) and token (guest/session identity). editToken is only returned here.",
       });
     },
   );
@@ -282,7 +284,7 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
       description: "Patch title, description, or visibility (unlisted | public | token).",
       inputSchema: z.object({
         slug: slugField,
-        token: tokenField,
+        token: tokenField.optional(),
         editToken: editTokenField,
         title: z.string().optional(),
         description: z.string().optional(),
@@ -303,10 +305,10 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     "idea_post",
     {
       title: "Post idea",
-      description: "Add a nested idea to a session. parentId omitted attaches under the root.",
+      description: "Add a nested idea to a session. parentId omitted attaches under the root. Token optional when a guest/session cookie or prior session_create token is used; pass editToken.",
       inputSchema: z.object({
         slug: slugField,
-        token: tokenField,
+        token: tokenField.optional(),
         editToken: editTokenField,
         title: z.string().min(1),
         body: z.string().optional(),
@@ -327,10 +329,10 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     "idea_comment",
     {
       title: "Comment on idea",
-      description: "Comment on an idea. Requires wallet token and edit access.",
+      description: "Comment on an idea. Requires edit access. Token optional (guest identity is minted when omitted).",
       inputSchema: z.object({
         slug: slugField,
-        token: tokenField,
+        token: tokenField.optional(),
         editToken: editTokenField,
         ideaId: z.string(),
         body: z.string().min(1),
@@ -355,7 +357,7 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
         "Upvote an idea or comment. For a sat boost, first send BSV with yours-agent send_bsv to the author, then pass satoshis and txid here. Do not send BSV from this tool. Calling vote again without satoshis toggles the upvote off.",
       inputSchema: z.object({
         slug: slugField,
-        token: tokenField,
+        token: tokenField.optional(),
         targetType: z.enum(["idea", "comment"]),
         targetId: z.string(),
         satoshis: z.number().int().min(0).optional(),
@@ -414,8 +416,8 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     {
       title: "Stripe Checkout",
       description:
-        "Create a Stripe Checkout URL for Brainstorm Archive. A human must complete payment in the browser. Requires a wallet token.",
-      inputSchema: z.object({ token: tokenField }),
+        "Create a Stripe Checkout URL for Brainstorm Archive. A human must complete payment in the browser. Token optional — a guest identity is minted when omitted.",
+      inputSchema: z.object({ token: tokenField.optional() }),
     },
     async ({ token }) => {
       const { status, json } = await call("POST", "/billing/checkout", { token });
@@ -429,10 +431,10 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     {
       title: "Prepare NFT inscription",
       description:
-        "Return the Markdown snapshot and sha256 to inscribe. Requires Archive subscription, wallet token, and edit access. Minting itself is done in Yours Wallet (inscribe action); then call nft_record.",
+        "Return the Markdown snapshot and sha256. Requires Archive and edit access. Prefer nft_mint (site wallet) over inscribing in a browser wallet.",
       inputSchema: z.object({
         slug: slugField,
-        token: tokenField,
+        token: tokenField.optional(),
         editToken: editTokenField,
       }),
     },
@@ -447,13 +449,34 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
   );
 
   server.registerTool(
+    "nft_mint",
+    {
+      title: "Mint NFT (site wallet)",
+      description:
+        "Inscribe the session Markdown as a 1Sat Ordinal using the Brainstorm site wallet. Requires Archive + edit access. Does not use Yours Wallet in the browser.",
+      inputSchema: z.object({
+        slug: slugField,
+        token: tokenField.optional(),
+        editToken: editTokenField,
+      }),
+    },
+    async ({ slug, token, editToken }) => {
+      const { status, json } = await call("POST", `/sessions/${encodeURIComponent(slug)}/nft/mint`, {
+        token,
+        editToken,
+      });
+      return graphOk(status, json);
+    },
+  );
+
+  server.registerTool(
     "nft_record",
     {
       title: "Record minted NFT",
-      description: "Store the 1Sat inscription txid/origin on the session after a successful inscribe.",
+      description: "Store a 1Sat inscription txid/origin if you inscribed outside the site wallet.",
       inputSchema: z.object({
         slug: slugField,
-        token: tokenField,
+        token: tokenField.optional(),
         editToken: editTokenField,
         txid: z.string().describe("64-char hex transaction id"),
         origin: z.string().optional(),
@@ -497,7 +520,7 @@ export function mcpDiscovery(): Record<string, unknown> {
     endpoint: `${PUBLIC_SITE}/mcp`,
     site: `${PUBLIC_SITE}/`,
     tools: [...MCP_TOOLS],
-    auth: "Yours Wallet BSM. Pair with yours-agent: auth_challenge → sign_message → auth_verify.",
+    auth: "Guest sessions by default. Optional Yours BSM via yours-agent for a site BSV identity.",
   };
 }
 

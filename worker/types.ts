@@ -4,6 +4,8 @@ export type WalletUser = {
   address: string | null;
   handle: string | null;
   displayName: string | null;
+  /** Cookie identity minted without Yours Wallet. */
+  isGuest: boolean;
 };
 
 export type SessionRow = {

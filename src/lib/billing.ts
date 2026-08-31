@@ -8,6 +8,12 @@ export type BillingStatus = {
   status: string | null;
   active: boolean;
   hasCustomer: boolean;
+  siteWallet?: {
+    configured: boolean;
+    address: string | null;
+    satoshis: number | null;
+    mintMode: "site" | "none";
+  };
 };
 
 export type NftPrepare = {
