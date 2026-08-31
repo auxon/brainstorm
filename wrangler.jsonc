@@ -15,6 +15,9 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
+    // Default auto-trailing-slash 307s /index.html → /, which on the custom
+    // domain would send browsers to the apex site instead of this Worker.
+    "html_handling": "none",
     "run_worker_first": true
   },
   "observability": {

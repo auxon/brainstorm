@@ -7,7 +7,13 @@
  * still works.
  */
 import { api } from "./api";
-import { APP_PREFIX, isViteDevPath, stripPrefix } from "./paths";
+import {
+  APP_PREFIX,
+  isViteDevPath,
+  isRootAssetRedirect,
+  stripPrefix,
+  toAssetPath,
+} from "./paths";
 import { ensureSchema } from "./schema";
 import { SessionRoom } from "./session-room";
 
@@ -17,7 +23,9 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === "/") {
+    // workers.dev `/` and the bare `/brainstorm` prefix need a trailing slash
+    // so Vite `base: /brainstorm/` asset URLs resolve.
+    if (url.pathname === "/" || url.pathname === APP_PREFIX) {
       url.pathname = `${APP_PREFIX}/`;
       return Response.redirect(url.toString(), 308);
     }
@@ -41,7 +49,20 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    const assetPath = inner === "/" ? "/index.html" : inner;
-    return env.ASSETS.fetch(new Request(new URL(assetPath + url.search, url.origin), request));
+    const assetPath = toAssetPath(url.pathname);
+    let assetResponse = await env.ASSETS.fetch(
+      new Request(new URL(assetPath + url.search, url.origin), request),
+    );
+    const location = assetResponse.headers.get("Location");
+    // html_handling may 307 /index.html → /. Follow that inside ASSETS so the
+    // browser never leaves /brainstorm/ for the apex site.
+    if (location && assetResponse.status >= 300 && assetResponse.status < 400) {
+      if (isRootAssetRedirect(location, url.origin)) {
+        assetResponse = await env.ASSETS.fetch(
+          new Request(new URL("/" + url.search, url.origin), request),
+        );
+      }
+    }
+    return assetResponse;
   },
 };
