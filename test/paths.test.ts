@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_PREFIX,
+  isMcpPath,
   isRootAssetRedirect,
   stripPrefix,
   toAssetPath,
@@ -38,5 +39,14 @@ describe("isRootAssetRedirect", () => {
 
   it("ignores unrelated redirects", () => {
     expect(isRootAssetRedirect("/login", "https://entangleit.com")).toBe(false);
+  });
+});
+
+describe("isMcpPath", () => {
+  it("matches the MCP endpoint under the app prefix", () => {
+    expect(isMcpPath(`${APP_PREFIX}/mcp`)).toBe(true);
+    expect(isMcpPath(`${APP_PREFIX}/mcp/`)).toBe(true);
+    expect(isMcpPath("/mcp")).toBe(true);
+    expect(isMcpPath(`${APP_PREFIX}/api/health`)).toBe(false);
   });
 });
