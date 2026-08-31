@@ -21,6 +21,7 @@ top of that plan to match SatPress.
 - Durable Objects + WebSocket hibernation for live maps
 - `@xyflow/react` canvas
 - `@1sat/react` + `@1sat/actions` + `@bsv/sdk` for Yours Wallet
+- MCP (`@modelcontextprotocol/server` v2 + `agents/mcp/server`) at `/brainstorm/mcp`
 
 ## Local development
 
@@ -39,6 +40,50 @@ does not require a wallet.
 npm test
 npm run typecheck
 ```
+
+## MCP (agents)
+
+Brainstorm exposes a **stateless Streamable HTTP** MCP server so agents can create
+sessions, post nested ideas, comment, vote or record sat boosts, and export
+Markdown/HTML without the UI.
+
+**Endpoint:** [https://entangleit.com/brainstorm/mcp](https://entangleit.com/brainstorm/mcp)
+
+Writes still require **Yours Wallet** identity (the same BSM challenge as the
+website). Pair with [yours-agent](https://github.com/auxon/yours-agent):
+
+1. `auth_challenge`
+2. yours-agent `sign_message` on the challenge (identity key)
+3. `auth_verify` with `nonce`, `message`, `sig`, and `pubKey`
+4. Pass the returned `token` on write tools
+5. `session_create` returns `editToken` **once** — store it and pass it as
+   `editToken` when posting to that board
+
+Sat boosts: send BSV with yours-agent `send_bsv`, then call `vote` with
+`satoshis` and `txid`. The MCP server never broadcasts a payment itself.
+
+### Cursor (remote MCP)
+
+Settings → MCP → add a remote server with URL:
+
+```
+https://entangleit.com/brainstorm/mcp
+```
+
+Or in `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "brainstorm": {
+      "url": "https://entangleit.com/brainstorm/mcp"
+    }
+  }
+}
+```
+
+`GET` on that URL returns a discovery document (tool names and pairing notes).
+`POST` is JSON-RPC Streamable HTTP.
 
 ## Deploy
 

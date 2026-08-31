@@ -29,6 +29,12 @@ export function isRootAssetRedirect(location: string, origin: string): boolean {
   }
 }
 
+/** True for the Streamable HTTP MCP endpoint (`/mcp` or `/brainstorm/mcp`). */
+export function isMcpPath(pathname: string): boolean {
+  const inner = stripPrefix(pathname).replace(/\/+$/, "") || "/";
+  return inner === "/mcp";
+}
+
 export function isViteDevPath(pathname: string): boolean {
   return (
     pathname.startsWith("/@") ||

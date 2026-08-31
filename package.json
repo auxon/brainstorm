@@ -20,13 +20,16 @@
     "@1sat/connect": "^0.0.88",
     "@1sat/react": "^0.0.85",
     "@bsv/sdk": "^2.4.1",
+    "@modelcontextprotocol/server": "2.0.0",
     "@xyflow/react": "^12.8.2",
+    "agents": "^0.22.0",
     "hono": "^4.9.8",
     "lucide-react": "^0.510.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router": "^7.8.2",
     "sonner": "^2.0.7",
+    "zod": "^4.5.4",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

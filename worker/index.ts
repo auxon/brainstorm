@@ -7,8 +7,10 @@
  * still works.
  */
 import { api } from "./api";
+import { handleMcp } from "./mcp";
 import {
   APP_PREFIX,
+  isMcpPath,
   isViteDevPath,
   isRootAssetRedirect,
   stripPrefix,
@@ -32,6 +34,10 @@ export default {
 
     if (url.pathname.startsWith(`${APP_PREFIX}/api/`)) {
       return api.fetch(request, env, ctx);
+    }
+
+    if (isMcpPath(url.pathname)) {
+      return handleMcp(request, env, ctx);
     }
 
     const inner = stripPrefix(url.pathname);
