@@ -281,6 +281,7 @@ export function registerBillingRoutes(api: App): void {
       ],
       success_url: `${origin}${APP_PREFIX}/s/${slug}?feature=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}${APP_PREFIX}/s/${slug}?feature=cancel`,
+      allow_promotion_codes: true,
       metadata: { kind: "feature", slug, brainstormUserId: user.id },
       integration_identifier: integrationIdentifier("brainstorm_feature"),
     });
@@ -330,6 +331,7 @@ export function registerBillingRoutes(api: App): void {
       ],
       success_url: `${origin}${APP_PREFIX}/s/${slug}?boost=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}${APP_PREFIX}/s/${slug}?boost=cancel`,
+      allow_promotion_codes: true,
       metadata: {
         kind: "boost",
         slug,
