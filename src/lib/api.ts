@@ -52,12 +52,23 @@ export type Edge = {
   label: string | null;
 };
 
+export type SessionNft = {
+  id: string;
+  origin: string;
+  txid: string;
+  contentHash: string;
+  contentType: string;
+  mintedBy: string;
+  createdAt: number;
+};
+
 export type SessionGraph = {
   session: PublicSession;
   ideas: Idea[];
   comments: Comment[];
   edges: Edge[];
   myVotes: { targetType: "idea" | "comment"; targetId: string; satoshis: number }[];
+  nfts: SessionNft[];
 };
 
 const TOKEN_KEY = (slug: string) => `brainstorm:session:${slug}`;

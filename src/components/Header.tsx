@@ -12,7 +12,12 @@ export function Header() {
             EntangleIT
           </span>
         </Link>
-        <WalletButton />
+        <div className="flex items-center gap-2">
+          <Link to="/billing" className="hidden text-xs text-muted hover:text-fg sm:inline">
+            Archive
+          </Link>
+          <WalletButton />
+        </div>
       </div>
     </header>
   );

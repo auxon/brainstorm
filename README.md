@@ -7,8 +7,10 @@ Sign in with **Yours Wallet** (same BRC-100 challenge flow as
 [SatPress](https://github.com/EntangleIT/satpress)): connect the extension,
 approve a sign-in message, and your compressed pubkey becomes your identity.
 From there you can create sessions, post nested ideas, comment, **upvote**, and
-optionally **boost with sats** paid to the author's BSV address. Sessions export
-to Markdown or a self-contained HTML file, and the mind map is shareable by URL.
+optionally **boost with sats** paid to the author's BSV address. **Archive**
+($9/month via Stripe) lets you mint a session as a **1Sat Ordinal NFT**.
+Sessions export to Markdown or a self-contained HTML file, and the mind map is
+shareable by URL.
 
 Architecture notes live in [PLAN.md](./PLAN.md). Auth and upvotes were added on
 top of that plan to match SatPress.
@@ -84,6 +86,25 @@ Or in `mcp.json`:
 
 `GET` on that URL returns a discovery document (tool names and pairing notes).
 `POST` is JSON-RPC Streamable HTTP.
+
+## Archive (Stripe + 1Sat NFT)
+
+[Brainstorm Archive](https://entangleit.com/brainstorm/billing) is **$9/month**.
+An active subscription unlocks **Mint NFT** on any session you can edit: the
+Worker snapshots the board to Markdown, Yours Wallet inscribes it as a 1Sat
+Ordinal, and we store the origin/txid on the session.
+
+- Checkout: Stripe-hosted Checkout (`mode: subscription`). No
+  `payment_method_types` (dynamic methods).
+- Customer portal for cancel / card update.
+- Webhook: `POST /brainstorm/api/billing/webhook`
+- Secrets: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (Wrangler). Price id and
+  publishable key are Worker `vars`.
+
+Do **not** enable Stripe Tax `automatic_tax` until the Dashboard has an active
+tax registration for each jurisdiction you sell into. Until then, Checkout
+collects the list price only. See
+[Collect taxes for recurring payments](https://docs.stripe.com/billing/taxes/collect-taxes).
 
 ## Deploy
 

@@ -31,6 +31,10 @@ export const MCP_TOOLS = [
   "idea_comment",
   "vote",
   "export_session",
+  "billing_status",
+  "billing_checkout",
+  "nft_prepare",
+  "nft_record",
 ] as const;
 
 export const MCP_INSTRUCTIONS = [
@@ -45,6 +49,7 @@ export const MCP_INSTRUCTIONS = [
   "The session owner may omit editToken. View-only session_get does not need a token for unlisted/public boards.",
   "vote records an upvote. For a sat boost, first send BSV with yours-agent send_bsv, then call vote with satoshis and txid.",
   "This server never sends BSV itself.",
+  "Archive ($9/mo Stripe) unlocks minting a session as a 1Sat Ordinal NFT. billing_checkout returns a Stripe Checkout URL (human completes payment in a browser). nft_prepare + Yours Wallet inscribe + nft_record stores the origin.",
 ].join("\n");
 
 type ToolResult = {
@@ -387,6 +392,81 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
       );
       if (status >= 400) return fail(status, json, text);
       return { content: [{ type: "text", text }] };
+    },
+  );
+
+  server.registerTool(
+    "billing_status",
+    {
+      title: "Billing status",
+      description: "Show Archive subscription status for the current wallet token ($9/mo Stripe → NFT minting).",
+      inputSchema: z.object({ token: tokenField.optional() }),
+    },
+    async ({ token }) => {
+      const { status, json } = await call("GET", "/billing/status", { token });
+      if (status >= 400) return fail(status, json);
+      return ok(json);
+    },
+  );
+
+  server.registerTool(
+    "billing_checkout",
+    {
+      title: "Stripe Checkout",
+      description:
+        "Create a Stripe Checkout URL for Brainstorm Archive. A human must complete payment in the browser. Requires a wallet token.",
+      inputSchema: z.object({ token: tokenField }),
+    },
+    async ({ token }) => {
+      const { status, json } = await call("POST", "/billing/checkout", { token });
+      if (status >= 400) return fail(status, json);
+      return ok(json);
+    },
+  );
+
+  server.registerTool(
+    "nft_prepare",
+    {
+      title: "Prepare NFT inscription",
+      description:
+        "Return the Markdown snapshot and sha256 to inscribe. Requires Archive subscription, wallet token, and edit access. Minting itself is done in Yours Wallet (inscribe action); then call nft_record.",
+      inputSchema: z.object({
+        slug: slugField,
+        token: tokenField,
+        editToken: editTokenField,
+      }),
+    },
+    async ({ slug, token, editToken }) => {
+      const { status, json } = await call("POST", `/sessions/${encodeURIComponent(slug)}/nft/prepare`, {
+        token,
+        editToken,
+      });
+      if (status >= 400) return fail(status, json);
+      return ok(json);
+    },
+  );
+
+  server.registerTool(
+    "nft_record",
+    {
+      title: "Record minted NFT",
+      description: "Store the 1Sat inscription txid/origin on the session after a successful inscribe.",
+      inputSchema: z.object({
+        slug: slugField,
+        token: tokenField,
+        editToken: editTokenField,
+        txid: z.string().describe("64-char hex transaction id"),
+        origin: z.string().optional(),
+        contentHash: z.string().optional(),
+      }),
+    },
+    async ({ slug, token, editToken, txid, origin, contentHash }) => {
+      const { status, json } = await call("POST", `/sessions/${encodeURIComponent(slug)}/nft`, {
+        token,
+        editToken,
+        body: { txid, origin, contentHash },
+      });
+      return graphOk(status, json);
     },
   );
 

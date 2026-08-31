@@ -14,10 +14,12 @@ import {
   verifyChallenge,
 } from "./auth";
 import { renderHtml, renderMarkdown } from "./export";
-import { nanoid, newId, randomToken, timingSafeEqualStr } from "./ids";
+import { nanoid, newId, randomToken, sha256Hex, timingSafeEqualStr } from "./ids";
 import { APP_PREFIX } from "./paths";
 import { ensureSchema } from "./schema";
-import type { CommentRow, EdgeRow, IdeaRow, SessionGraph, SessionRow, WalletUser } from "./types";
+import { registerBillingRoutes, userHasArchive } from "./billing";
+import { NFT_CONTENT_TYPE, NFT_MAX_BYTES, nftOriginFromTxid } from "./billing-lib";
+import type { CommentRow, EdgeRow, IdeaRow, SessionGraph, SessionNft, SessionRow, WalletUser } from "./types";
 import { HttpError } from "./types";
 
 type Vars = { user: WalletUser | null };
@@ -343,6 +345,67 @@ api.get("/sessions/:slug/export.html", async (c) => {
   });
 });
 
+api.post("/sessions/:slug/nft/prepare", async (c) => {
+  assertSameOriginPost(c.req.raw);
+  const user = requireUser(c);
+  const graph = await loadGraph(c, { requireEdit: true });
+  if (!(await userHasArchive(c.env.DB, user.id))) {
+    throw new HttpError(402, "Archive subscription required to mint an NFT");
+  }
+  const markdown = renderMarkdown(graph);
+  const bytes = new TextEncoder().encode(markdown).byteLength;
+  if (bytes > NFT_MAX_BYTES) throw new HttpError(413, "Session is too large to inscribe in a single ordinal");
+  const contentHash = await sha256Hex(markdown);
+  return c.json({
+    markdown,
+    contentHash,
+    contentType: NFT_CONTENT_TYPE,
+    bytes,
+    map: {
+      app: "brainstorm",
+      type: "brainstorm-session",
+      slug: graph.session.slug,
+      title: graph.session.title,
+      url: `https://entangleit.com/brainstorm/s/${graph.session.slug}`,
+      sha256: contentHash,
+    },
+  });
+});
+
+api.post("/sessions/:slug/nft", async (c) => {
+  assertSameOriginPost(c.req.raw);
+  const user = requireUser(c);
+  const graph = await loadGraph(c, { requireEdit: true });
+  if (!(await userHasArchive(c.env.DB, user.id))) {
+    throw new HttpError(402, "Archive subscription required to mint an NFT");
+  }
+  const body = await readJson(c.req.raw);
+  const txid = typeof body.txid === "string" ? body.txid.trim().toLowerCase() : "";
+  if (!/^[0-9a-f]{64}$/.test(txid)) throw new HttpError(400, "Invalid txid");
+  const markdown = renderMarkdown(graph);
+  const contentHash = await sha256Hex(markdown);
+  if (typeof body.contentHash === "string" && body.contentHash !== contentHash) {
+    throw new HttpError(409, "Session changed since you prepared the inscription — try minting again");
+  }
+  const origin =
+    typeof body.origin === "string" && body.origin.trim()
+      ? body.origin.trim()
+      : nftOriginFromTxid(txid);
+  const existing = await c.env.DB.prepare("SELECT id FROM nfts WHERE txid = ?").bind(txid).first();
+  if (!existing) {
+    await c.env.DB.prepare(
+      "INSERT INTO nfts (id, session_id, origin, txid, content_hash, content_type, minted_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(newId(), graph.session.id, origin, txid, contentHash, NFT_CONTENT_TYPE, user.id, Date.now())
+      .run();
+  }
+  await touch(c.env.DB, graph.session.id);
+  await broadcast(c, graph.session.id, { type: "nft.mint", txid, origin });
+  return c.json(await loadGraph(c));
+});
+
+registerBillingRoutes(api);
+
 export { SIGN_TAG };
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -425,7 +488,7 @@ async function loadGraph(
   const edit = canEdit(session, token, user);
   if (opts.requireEdit && !edit) throw new HttpError(403, "Edit access required");
 
-  const [ideas, comments, edges, votes] = await Promise.all([
+  const [ideas, comments, edges, votes, nfts] = await Promise.all([
     listIdeas(c.env.DB, session.id),
     c.env.DB.prepare("SELECT * FROM comments WHERE session_id = ? ORDER BY created_at ASC")
       .bind(session.id)
@@ -441,6 +504,13 @@ async function loadGraph(
           .all<{ targetType: "idea" | "comment"; targetId: string; satoshis: number }>()
           .then((r) => r.results ?? [])
       : Promise.resolve([]),
+    c.env.DB.prepare(
+      "SELECT id, origin, txid, content_hash as contentHash, content_type as contentType, minted_by as mintedBy, created_at as createdAt FROM nfts WHERE session_id = ? ORDER BY created_at DESC",
+    )
+      .bind(session.id)
+      .all<SessionNft>()
+      .then((r) => r.results ?? [])
+      .catch(() => [] as SessionNft[]),
   ]);
 
   return {
@@ -449,6 +519,7 @@ async function loadGraph(
     comments,
     edges,
     myVotes: votes,
+    nfts,
   };
 }
 

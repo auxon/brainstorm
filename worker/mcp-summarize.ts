@@ -48,6 +48,7 @@ export type SessionSummary = {
   ideas: IdeaSummary[];
   edges: { id: string; sourceId: string; targetId: string; label: string | null }[];
   myVotes: SessionGraph["myVotes"];
+  nfts: { origin: string; txid: string; contentHash: string; createdAt: number }[];
 };
 
 /**
@@ -55,8 +56,11 @@ export type SessionSummary = {
  * instead of dumping every field agents do not need.
  */
 export function summarizeSession(graph: SessionGraph): SessionSummary {
+  const comments = graph.comments ?? [];
+  const edges = graph.edges ?? [];
+  const ideaRows = graph.ideas ?? [];
   const byParent = new Map<string | null, IdeaRow[]>();
-  for (const idea of graph.ideas) {
+  for (const idea of ideaRows) {
     const key = idea.parent_id;
     const list = byParent.get(key) ?? [];
     list.push(idea);
@@ -69,7 +73,7 @@ export function summarizeSession(graph: SessionGraph): SessionSummary {
   const ideas: IdeaSummary[] = [];
   function walk(parentId: string | null) {
     for (const idea of byParent.get(parentId) ?? []) {
-      const thread = commentsFor(graph.comments, idea.id);
+      const thread = commentsFor(comments, idea.id);
       const recent = thread.slice(-COMMENTS_PER_IDEA);
       ideas.push({
         id: idea.id,
@@ -104,17 +108,23 @@ export function summarizeSession(graph: SessionGraph): SessionSummary {
       visibility: graph.session.visibility,
       canEdit: graph.session.canEdit,
       isOwner: graph.session.isOwner,
-      ideaCount: graph.ideas.length,
-      commentCount: graph.comments.length,
-      edgeCount: graph.edges.length,
+      ideaCount: ideaRows.length,
+      commentCount: comments.length,
+      edgeCount: edges.length,
     },
     ideas,
-    edges: graph.edges.map((e) => ({
+    edges: edges.map((e) => ({
       id: e.id,
       sourceId: e.source_id,
       targetId: e.target_id,
       label: e.label,
     })),
     myVotes: graph.myVotes,
+    nfts: (graph.nfts ?? []).map((n) => ({
+      origin: n.origin,
+      txid: n.txid,
+      contentHash: n.contentHash,
+      createdAt: n.createdAt,
+    })),
   };
 }

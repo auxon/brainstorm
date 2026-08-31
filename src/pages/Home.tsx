@@ -43,7 +43,11 @@ export function HomePage() {
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">Post ideas. Map them. Share the session.</h1>
         <p className="mt-3 text-muted">
           Sign in with Yours Wallet to create a board, upvote ideas and comments, and optionally boost
-          with sats. Export any session to Markdown or HTML. Agents can use the same API over MCP at{" "}
+          with sats. Export any session to Markdown or HTML.{" "}
+          <Link to="/billing" className="text-accent hover:underline">
+            Archive ($9/mo)
+          </Link>{" "}
+          mints a board as a 1Sat Ordinal NFT. Agents can use the same API over MCP at{" "}
           <a href="https://entangleit.com/brainstorm/mcp" className="text-accent hover:underline">
             /brainstorm/mcp
           </a>
