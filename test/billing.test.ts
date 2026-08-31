@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkoutKind, featureWindowMs, isArchiveActive, nftOriginFromTxid } from "../worker/billing-lib";
+import { archiveLineItems, checkoutKind, featureWindowMs, isArchiveActive, nftOriginFromTxid, productionRequiresLiveStripe, stripeKeyLivemode } from "../worker/billing-lib";
 import { boostUsdToCents } from "../worker/commerce";
 import { authorKind, authorKindLabel, heatIntensity, ideaHeat, SITE_AGENT_PUBKEY } from "../worker/identity";
 
@@ -60,5 +60,22 @@ describe("identity and heat", () => {
     expect(ideaHeat(10, 500)).toBe(5010);
     expect(heatIntensity(5000)).toBe(1);
     expect(heatIntensity(0)).toBe(0);
+  });
+});
+
+describe("stripe live vs test keys", () => {
+  it("detects live and test prefixes including sandbox rkcs_test", () => {
+    expect(stripeKeyLivemode("pk_live_abc")).toBe(true);
+    expect(stripeKeyLivemode("rk_live_abc")).toBe(true);
+    expect(stripeKeyLivemode("sk_test_abc")).toBe(false);
+    expect(stripeKeyLivemode("rkcs_test_abc")).toBe(false);
+    expect(stripeKeyLivemode(undefined)).toBeNull();
+    expect(productionRequiresLiveStripe("entangleit.com", false)).toBe(true);
+    expect(productionRequiresLiveStripe("entangleit.com", true)).toBe(false);
+    expect(productionRequiresLiveStripe("localhost", false)).toBe(false);
+    const liveItems = archiveLineItems("price_test_123", true);
+    expect(liveItems[0]).toHaveProperty("price_data");
+    const testItems = archiveLineItems("price_test_123", false);
+    expect(testItems[0]).toEqual({ price: "price_test_123", quantity: 1 });
   });
 });
