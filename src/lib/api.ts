@@ -9,6 +9,14 @@ export type PublicSession = {
   updated_at: number;
   canEdit: boolean;
   isOwner: boolean;
+  featuredUntil?: number | null;
+};
+
+export type ExploreBoard = PublicSession & { ideaCount: number };
+
+export type ExploreResponse = {
+  featured: ExploreBoard[];
+  public: ExploreBoard[];
 };
 
 export type Idea = {
@@ -26,6 +34,7 @@ export type Idea = {
   sort_index: number;
   vote_count: number;
   satoshis: number;
+  usd_cents?: number;
   created_at: number;
   updated_at: number;
 };
@@ -41,6 +50,7 @@ export type Comment = {
   author_address: string | null;
   vote_count: number;
   satoshis: number;
+  usd_cents?: number;
   created_at: number;
 };
 
@@ -141,4 +151,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit, slug?: strin
 
 export function votedSet(graph: SessionGraph, type: "idea" | "comment"): Set<string> {
   return new Set(graph.myVotes.filter((v) => v.targetType === type).map((v) => v.targetId));
+}
+
+export async function fetchExplore(): Promise<ExploreResponse> {
+  return apiFetch<ExploreResponse>("/explore");
 }

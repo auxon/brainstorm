@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
+import { toast } from "sonner";
 import { LayoutGrid, Share2, Workflow } from "lucide-react";
 import { Shell } from "@/components/Header";
 import { IdeaBoard } from "@/components/IdeaBoard";
@@ -7,9 +8,11 @@ import { MindMap } from "@/components/MindMap";
 import { ShareDialog } from "@/components/ShareDialog";
 import { ExportMenu } from "@/components/ExportMenu";
 import { MintNftButton } from "@/components/MintNftButton";
+import { FeatureButton } from "@/components/FeatureButton";
 import { apiFetch, rememberSession, saveEditToken, type SessionGraph } from "@/lib/api";
 import { wsUrl } from "@/lib/base-path";
 import { cn } from "@/lib/format";
+import { refreshSession } from "@/lib/auth";
 
 export function SessionPage() {
   const { slug = "" } = useParams();
@@ -51,6 +54,37 @@ export function SessionPage() {
     return () => ws.close();
   }, [graph?.session.id, slug]);
 
+  useEffect(() => {
+    const featureOk = params.get("feature") === "success";
+    const boostOk = params.get("boost") === "success";
+    const sessionId = params.get("session_id");
+    if (!featureOk && !boostOk) return;
+    let cancelled = false;
+    void (async () => {
+      if (sessionId?.startsWith("cs_")) {
+        try {
+          await apiFetch("/billing/claim", { method: "POST", body: JSON.stringify({ sessionId }) });
+          await refreshSession();
+        } catch {
+          /* webhook may still land */
+        }
+      }
+      if (!cancelled) {
+        toast.success(featureOk ? "Board is featured on Explore for 7 days." : "Boost applied.");
+        const next = await apiFetch<SessionGraph>(`/sessions/${slug}`, undefined, slug).catch(() => null);
+        if (next) setGraph(next);
+      }
+      const cleaned = new URLSearchParams(params);
+      cleaned.delete("feature");
+      cleaned.delete("boost");
+      cleaned.delete("session_id");
+      setParams(cleaned, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [params, slug, setParams]);
+
   if (error) {
     return (
       <Shell>
@@ -72,6 +106,11 @@ export function SessionPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{graph.session.title}</h1>
           {graph.session.description ? <p className="mt-1 text-sm text-muted">{graph.session.description}</p> : null}
+          {graph.session.featuredUntil && graph.session.featuredUntil > Date.now() ? (
+            <p className="mt-1 text-xs text-accent">
+              Featured until {new Date(graph.session.featuredUntil).toLocaleDateString()}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-border p-0.5">
@@ -98,6 +137,11 @@ export function SessionPage() {
             <Share2 className="size-3.5" /> Share
           </button>
           <ExportMenu slug={slug} />
+          <FeatureButton
+            slug={slug}
+            featuredUntil={graph.session.featuredUntil}
+            canEdit={graph.session.canEdit}
+          />
           <MintNftButton slug={slug} graph={graph} onUpdate={setGraph} />
         </div>
       </div>

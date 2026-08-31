@@ -36,6 +36,7 @@ export type IdeaRow = {
   sort_index: number;
   vote_count: number;
   satoshis: number;
+  usd_cents?: number;
   created_at: number;
   updated_at: number;
 };
@@ -51,6 +52,7 @@ export type CommentRow = {
   author_address: string | null;
   vote_count: number;
   satoshis: number;
+  usd_cents?: number;
   created_at: number;
 };
 
@@ -65,6 +67,7 @@ export type EdgeRow = {
 export type PublicSession = Omit<SessionRow, "view_token" | "edit_token"> & {
   canEdit: boolean;
   isOwner: boolean;
+  featuredUntil?: number | null;
 };
 
 export type SessionNft = {

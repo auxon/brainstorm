@@ -48,7 +48,10 @@ export function ShareDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">Share session</h2>
-        <p className="mt-1 text-sm text-muted">Anyone with the view link can read. The edit link can change the map.</p>
+        <p className="mt-1 text-sm text-muted">
+          Anyone with the view link can read. The edit link can change the map. Featuring a board ($29 / 7 days)
+          also flips visibility to public so it can appear on Explore.
+        </p>
         <label className="mt-4 block text-xs uppercase tracking-wider text-muted">Visibility</label>
         <select
           value={visibility}

@@ -38,7 +38,7 @@ export function LoginPage() {
         <p className="text-xs uppercase tracking-[0.2em] text-muted">Optional</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">BSV wallet (optional)</h1>
         <p className="mt-3 text-muted">
-          Boards, votes, Archive subscriptions, and NFT mints work without a wallet. Connect Yours only
+          Boards, votes, Archive, Featured, USD boosts, and NFT mints work without a wallet. Connect Yours only
           if you want a BSV identity and to boost ideas with sats from your own keys. The site wallet
           holds the treasury that inscribes Archive NFTs.
         </p>

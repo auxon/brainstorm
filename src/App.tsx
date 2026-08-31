@@ -5,6 +5,7 @@ import { HomePage } from "@/pages/Home";
 import { SessionPage } from "@/pages/Session";
 import { LoginPage } from "@/pages/Login";
 import { BillingPage } from "@/pages/Billing";
+import { ExplorePage } from "@/pages/Explore";
 import { BASE_PATH } from "@/lib/base-path";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/billing" element={<BillingPage />} />
+          <Route path="/explore" element={<ExplorePage />} />
           <Route path="/s/:slug" element={<SessionPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -1,14 +1,14 @@
 import { ArrowUp, Zap } from "lucide-react";
-import { useNavigate } from "react-router";
-import { toast } from "sonner";
 import { useState } from "react";
+import { toast } from "sonner";
 import { apiFetch, type SessionGraph } from "@/lib/api";
 import { useSession } from "@/lib/auth";
-import { cn, formatSats } from "@/lib/format";
+import { BOOST_USD } from "@/lib/billing";
+import { cn, formatSats, formatUsd } from "@/lib/format";
 import { sendBsvWithYours } from "@/lib/yours";
 import { ensureYoursConnected } from "@/lib/wallet-store";
 
-const BOOSTS = [10, 100, 1000];
+const SAT_BOOSTS = [10, 100, 1000];
 
 export function VoteButton({
   graph,
@@ -17,6 +17,7 @@ export function VoteButton({
   targetId,
   voteCount,
   satoshis,
+  usdCents = 0,
   payAddress,
   onUpdate,
 }: {
@@ -26,12 +27,13 @@ export function VoteButton({
   targetId: string;
   voteCount: number;
   satoshis: number;
+  usdCents?: number;
   payAddress?: string | null;
   onUpdate: (g: SessionGraph) => void;
 }) {
   const { user } = useSession();
-  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const mine = graph.myVotes.some((v) => v.targetType === targetType && v.targetId === targetId);
 
   async function vote(extraSats = 0, txid: string | null = null) {
@@ -50,9 +52,25 @@ export function VoteButton({
     }
   }
 
-  async function boost(amount: number) {
+  async function usdBoost(usd: number) {
+    setBusy(true);
+    setOpen(false);
+    try {
+      const { url } = await apiFetch<{ url: string }>(
+        "/billing/boost",
+        { method: "POST", body: JSON.stringify({ slug, targetType, targetId, usd }) },
+        slug,
+      );
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not start boost checkout");
+      setBusy(false);
+    }
+  }
+
+  async function satBoost(amount: number) {
     if (!user || user.isGuest) {
-      navigate("/login");
+      toast.message("Connect Yours Wallet for sat boosts, or use a $1–$5 Stripe boost.");
       return;
     }
     if (!payAddress) {
@@ -60,6 +78,7 @@ export function VoteButton({
       return;
     }
     setBusy(true);
+    setOpen(false);
     try {
       if (!(await ensureYoursConnected())) throw new Error("Connect Yours Wallet first.");
       toast.message("Approve the upvote payment in Yours Wallet");
@@ -90,34 +109,49 @@ export function VoteButton({
         <ArrowUp className="size-3.5" strokeWidth={2.2} />
         {voteCount}
       </button>
-      {satoshis > 0 ? (
-        <span className="font-mono text-[11px] text-accent/80">{formatSats(satoshis)}</span>
-      ) : null}
-      {payAddress && user && !user.isGuest ? (
-        <div className="group relative">
-          <button
-            type="button"
-            disabled={busy}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-raised px-2 text-[11px] text-muted hover:text-fg"
-            title="Boost with sats via Yours Wallet"
-          >
-            <Zap className="size-3" strokeWidth={1.8} />
-            Boost
-          </button>
-          <div className="invisible absolute left-0 z-20 mt-1 flex flex-col rounded-md border border-border bg-raised py-1 opacity-0 shadow-lg group-hover:visible group-hover:opacity-100">
-            {BOOSTS.map((n) => (
+      {satoshis > 0 ? <span className="font-mono text-[11px] text-accent/80">{formatSats(satoshis)}</span> : null}
+      {usdCents > 0 ? <span className="font-mono text-[11px] text-accent/80">{formatUsd(usdCents)}</span> : null}
+      <div className="relative">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-raised px-2 text-[11px] text-muted hover:text-fg"
+          title="Boost with Stripe ($1 / $3 / $5)"
+        >
+          <Zap className="size-3" strokeWidth={1.8} />
+          Boost
+        </button>
+        {open ? (
+          <div className="absolute right-0 z-20 mt-1 min-w-[140px] rounded-md border border-border bg-raised py-1 shadow-lg">
+            {BOOST_USD.map((n) => (
               <button
                 key={n}
                 type="button"
-                className="px-3 py-1.5 text-left text-xs text-fg hover:bg-bg"
-                onClick={() => void boost(n)}
+                className="block w-full px-3 py-1.5 text-left text-xs text-fg hover:bg-bg"
+                onClick={() => void usdBoost(n)}
               >
-                {formatSats(n)}
+                ${n} boost
               </button>
             ))}
+            {payAddress && user && !user.isGuest ? (
+              <>
+                <div className="my-1 border-t border-border" />
+                {SAT_BOOSTS.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className="block w-full px-3 py-1.5 text-left text-xs text-muted hover:bg-bg hover:text-fg"
+                    onClick={() => void satBoost(n)}
+                  >
+                    {formatSats(n)} (Yours)
+                  </button>
+                ))}
+              </>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Shell } from "@/components/Header";
-import { apiFetch, listRecent, rememberSession, saveEditToken, type PublicSession } from "@/lib/api";
+import { ExploreCard } from "@/components/ExploreCard";
+import { apiFetch, fetchExplore, listRecent, rememberSession, saveEditToken, type ExploreBoard, type PublicSession } from "@/lib/api";
 import { refreshSession, useSession } from "@/lib/auth";
+import { FEATURE_DAYS, FEATURE_USD } from "@/lib/billing";
 
 export function HomePage() {
   const { user, isPending } = useSession();
@@ -11,7 +13,14 @@ export function HomePage() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
+  const [featured, setFeatured] = useState<ExploreBoard[]>([]);
   const recent = listRecent();
+
+  useEffect(() => {
+    void fetchExplore()
+      .then((data) => setFeatured(data.featured))
+      .catch(() => undefined);
+  }, []);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -45,8 +54,11 @@ export function HomePage() {
           <Link to="/billing" className="text-accent hover:underline">
             Archive ($9/mo)
           </Link>{" "}
-          inscribes a board as a 1Sat Ordinal NFT from the Brainstorm site wallet.
-          Agents can use the same API over MCP at{" "}
+          inscribes a board as a 1Sat Ordinal NFT.{" "}
+          <Link to="/explore" className="text-accent hover:underline">
+            Feature a board (${FEATURE_USD}/{FEATURE_DAYS}d)
+          </Link>{" "}
+          or boost ideas $1–$5 with Stripe. Agents can use the same API over MCP at{" "}
           <a href="https://entangleit.com/brainstorm/mcp" className="text-accent hover:underline">
             /brainstorm/mcp
           </a>
@@ -80,8 +92,23 @@ export function HomePage() {
             <Link to="/login" className="text-accent hover:underline">
               Optional BSV wallet
             </Link>{" "}
-            is only for sat boosts.
+            is only for on-chain sat boosts. USD boosts use Stripe.
           </p>
+        ) : null}
+        {featured.length ? (
+          <section className="mt-10">
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-sm uppercase tracking-wider text-muted">Featured</h2>
+              <Link to="/explore" className="text-xs text-accent hover:underline">
+                See all
+              </Link>
+            </div>
+            <div className="mt-3 space-y-2">
+              {featured.slice(0, 3).map((board) => (
+                <ExploreCard key={board.slug} board={board} featured />
+              ))}
+            </div>
+          </section>
         ) : null}
         {recent.length ? (
           <section className="mt-10">

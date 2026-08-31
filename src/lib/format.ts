@@ -9,6 +9,11 @@ export function formatSats(sats: number): string {
   return `${sats.toLocaleString()} sats`;
 }
 
+export function formatUsd(cents: number): string {
+  const n = (cents || 0) / 100;
+  return n % 1 === 0 ? `$${n.toFixed(0)}` : `$${n.toFixed(2)}`;
+}
+
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }

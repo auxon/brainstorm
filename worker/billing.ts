@@ -5,12 +5,19 @@ import { APP_PREFIX } from "./paths";
 import { HttpError, type WalletUser } from "./types";
 import { attachSessionCookie, ensureSessionUser, isGuestId, mintSessionForUser } from "./auth";
 import { siteWalletStatus } from "./site-wallet";
+import { fulfillBoost, fulfillFeature } from "./commerce";
+import { timingSafeEqualStr } from "./ids";
 import {
   ARCHIVE_AMOUNT_USD,
   ARCHIVE_INTERVAL,
+  BOOST_OPTIONS,
+  FEATURE_AMOUNT_USD,
+  FEATURE_DAYS,
   billingConfigured,
+  checkoutKind,
   integrationIdentifier,
   isArchiveActive,
+  stripePaymentsReady,
   type BillingEnv,
 } from "./billing-lib";
 
@@ -107,20 +114,86 @@ function siteOrigin(request: Request): string {
   return url.origin;
 }
 
+function presentedToken(request: Request): string | null {
+  const url = new URL(request.url);
+  return url.searchParams.get("k") || request.headers.get("x-token");
+}
+
+async function ensureCustomer(db: D1Database, stripe: Stripe, user: WalletUser): Promise<string> {
+  const existing = await loadBillingUser(db, user.id);
+  if (existing?.stripe_customer_id) return existing.stripe_customer_id;
+  const customer = await stripe.customers.create({ metadata: { brainstormUserId: user.id } });
+  await upsertSubscription(db, { userId: user.id, customerId: customer.id });
+  return customer.id;
+}
+
+async function fulfillPaidCheckout(db: D1Database, checkout: Stripe.Checkout.Session): Promise<void> {
+  const kind = checkoutKind({
+    mode: checkout.mode,
+    subscription: checkout.subscription,
+    metadata: checkout.metadata,
+  });
+  const userId =
+    (typeof checkout.client_reference_id === "string" && checkout.client_reference_id) ||
+    (typeof checkout.metadata?.brainstormUserId === "string" && checkout.metadata.brainstormUserId) ||
+    null;
+  const customerId = typeof checkout.customer === "string" ? checkout.customer : checkout.customer?.id ?? null;
+  const subscriptionId =
+    typeof checkout.subscription === "string" ? checkout.subscription : checkout.subscription?.id ?? null;
+
+  if (kind === "feature") {
+    const slug = checkout.metadata?.slug;
+    if (!slug) return;
+    await fulfillFeature(db, { checkoutSessionId: checkout.id, slug, userId });
+    if (customerId) await upsertSubscription(db, { userId, customerId });
+    return;
+  }
+  if (kind === "boost") {
+    const slug = checkout.metadata?.slug;
+    const targetType = checkout.metadata?.targetType === "comment" ? "comment" : "idea";
+    const targetId = checkout.metadata?.targetId;
+    const usdCents = Number(checkout.metadata?.usdCents ?? 0);
+    if (!slug || !targetId || !usdCents) return;
+    await fulfillBoost(db, {
+      checkoutSessionId: checkout.id,
+      slug,
+      userId,
+      targetType,
+      targetId,
+      usdCents,
+    });
+    if (customerId) await upsertSubscription(db, { userId, customerId });
+    return;
+  }
+  if (kind === "archive") {
+    await upsertSubscription(db, {
+      userId,
+      customerId,
+      subscriptionId,
+      status: "active",
+    });
+  }
+}
+
 export function registerBillingRoutes(api: App): void {
   api.get("/billing/status", async (c) => {
     const env = c.env as BillingEnv;
     const configured = billingConfigured(env);
+    const payments = stripePaymentsReady(env);
     const user = c.get("user");
     const row = user ? await loadBillingUser(c.env.DB, user.id) : null;
     const siteWallet = await siteWalletStatus(env);
     return c.json({
       configured,
-      publishableKey: configured ? env.STRIPE_PUBLISHABLE_KEY ?? null : null,
+      payments,
+      publishableKey: configured || payments ? env.STRIPE_PUBLISHABLE_KEY ?? null : null,
       priceId: configured ? env.STRIPE_PRICE_ID ?? null : null,
       amountUsd: ARCHIVE_AMOUNT_USD,
       interval: ARCHIVE_INTERVAL,
       product: "Brainstorm Archive",
+      featureUsd: FEATURE_AMOUNT_USD,
+      featureDays: FEATURE_DAYS,
+      boosts: BOOST_OPTIONS.map((b) => b.usd),
       status: row?.stripe_status ?? null,
       active: isArchiveActive(row?.stripe_status),
       hasCustomer: Boolean(row?.stripe_customer_id),
@@ -139,16 +212,7 @@ export function registerBillingRoutes(api: App): void {
     if (isArchiveActive(existing?.stripe_status)) {
       return c.json({ url: `${siteOrigin(c.req.raw)}${APP_PREFIX}/billing`, alreadyActive: true });
     }
-
-    let customerId = existing?.stripe_customer_id ?? null;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        metadata: { brainstormUserId: user.id },
-      });
-      customerId = customer.id;
-      await upsertSubscription(c.env.DB, { userId: user.id, customerId });
-    }
-
+    const customerId = await ensureCustomer(c.env.DB, stripe, user);
     const origin = siteOrigin(c.req.raw);
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -158,37 +222,128 @@ export function registerBillingRoutes(api: App): void {
       success_url: `${origin}${APP_PREFIX}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}${APP_PREFIX}/billing?checkout=cancel`,
       allow_promotion_codes: true,
-      metadata: { brainstormUserId: user.id },
-      subscription_data: { metadata: { brainstormUserId: user.id } },
-      integration_identifier: integrationIdentifier(),
+      metadata: { kind: "archive", brainstormUserId: user.id },
+      subscription_data: { metadata: { brainstormUserId: user.id, kind: "archive" } },
+      integration_identifier: integrationIdentifier("brainstorm_archive"),
     });
     if (!session.url) throw new HttpError(502, "Stripe did not return a checkout URL");
     return c.json({ url: session.url });
   });
 
+  api.post("/billing/feature", async (c) => {
+    const user = await requireActor(c);
+    const env = c.env as BillingEnv;
+    if (!stripePaymentsReady(env)) throw new HttpError(503, "Billing is not configured");
+    const body = (await c.req.json().catch(() => null)) as { slug?: string } | null;
+    const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
+    if (!slug) throw new HttpError(400, "slug required");
+    const sessionRow = await c.env.DB.prepare("SELECT * FROM sessions WHERE slug = ?")
+      .bind(slug)
+      .first<{ id: string; owner_user_id: string; edit_token: string }>();
+    if (!sessionRow) throw new HttpError(404, "Session not found");
+    const token = presentedToken(c.req.raw);
+    const canEdit =
+      user.id === sessionRow.owner_user_id || (token ? timingSafeEqualStr(token, sessionRow.edit_token) : false);
+    if (!canEdit) throw new HttpError(403, "Edit access required to feature this board");
+    const stripe = stripeClient(env);
+    const customerId = await ensureCustomer(c.env.DB, stripe, user);
+    const origin = siteOrigin(c.req.raw);
+    const checkout = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer: customerId,
+      client_reference_id: user.id,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: FEATURE_AMOUNT_USD * 100,
+            product_data: {
+              name: `Featured board (${FEATURE_DAYS} days)`,
+              description: `Pin ${slug} on /brainstorm/explore for ${FEATURE_DAYS} days`,
+            },
+          },
+        },
+      ],
+      success_url: `${origin}${APP_PREFIX}/s/${slug}?feature=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}${APP_PREFIX}/s/${slug}?feature=cancel`,
+      metadata: { kind: "feature", slug, brainstormUserId: user.id },
+      integration_identifier: integrationIdentifier("brainstorm_feature"),
+    });
+    if (!checkout.url) throw new HttpError(502, "Stripe did not return a checkout URL");
+    return c.json({ url: checkout.url });
+  });
+
+  api.post("/billing/boost", async (c) => {
+    const user = await requireActor(c);
+    const env = c.env as BillingEnv;
+    if (!stripePaymentsReady(env)) throw new HttpError(503, "Billing is not configured");
+    const body = (await c.req.json().catch(() => null)) as {
+      slug?: string;
+      targetType?: string;
+      targetId?: string;
+      usd?: number;
+    } | null;
+    const slug = typeof body?.slug === "string" ? body.slug.trim() : "";
+    const targetType = body?.targetType === "comment" ? "comment" : body?.targetType === "idea" ? "idea" : null;
+    const targetId = typeof body?.targetId === "string" ? body.targetId : "";
+    const usd = Number(body?.usd);
+    if (!slug || !targetType || !targetId) throw new HttpError(400, "slug, targetType, and targetId required");
+    if (!BOOST_OPTIONS.some((b) => b.usd === usd)) throw new HttpError(400, "Boost must be $1, $3, or $5");
+    const sessionRow = await c.env.DB.prepare("SELECT id FROM sessions WHERE slug = ?").bind(slug).first();
+    if (!sessionRow) throw new HttpError(404, "Session not found");
+    const stripe = stripeClient(env);
+    const customerId = await ensureCustomer(c.env.DB, stripe, user);
+    const origin = siteOrigin(c.req.raw);
+    const usdCents = usd * 100;
+    const checkout = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer: customerId,
+      client_reference_id: user.id,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: usdCents,
+            product_data: {
+              name: `Boost idea $${usd}`,
+              description: `USD boost on ${slug} (platform fee included)`,
+            },
+          },
+        },
+      ],
+      success_url: `${origin}${APP_PREFIX}/s/${slug}?boost=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}${APP_PREFIX}/s/${slug}?boost=cancel`,
+      metadata: {
+        kind: "boost",
+        slug,
+        targetType,
+        targetId,
+        usdCents: String(usdCents),
+        brainstormUserId: user.id,
+      },
+      integration_identifier: integrationIdentifier("brainstorm_boost"),
+    });
+    if (!checkout.url) throw new HttpError(502, "Stripe did not return a checkout URL");
+    return c.json({ url: checkout.url });
+  });
+
   api.post("/billing/claim", async (c) => {
     const env = c.env as BillingEnv;
-    if (!billingConfigured(env)) throw new HttpError(503, "Billing is not configured");
+    if (!stripePaymentsReady(env)) throw new HttpError(503, "Billing is not configured");
     const body = (await c.req.json().catch(() => null)) as { sessionId?: string } | null;
     const sessionId = typeof body?.sessionId === "string" ? body.sessionId.trim() : "";
     if (!sessionId.startsWith("cs_")) throw new HttpError(400, "Missing Stripe Checkout session id");
     const stripe = stripeClient(env);
     const checkout = await stripe.checkout.sessions.retrieve(sessionId);
     if (checkout.status !== "complete") throw new HttpError(402, "Checkout is not complete yet");
+    await fulfillPaidCheckout(c.env.DB, checkout);
+
     const userId =
       (typeof checkout.client_reference_id === "string" && checkout.client_reference_id) ||
       (typeof checkout.metadata?.brainstormUserId === "string" && checkout.metadata.brainstormUserId) ||
       null;
-    const customerId = typeof checkout.customer === "string" ? checkout.customer : checkout.customer?.id ?? null;
-    const subscriptionId =
-      typeof checkout.subscription === "string" ? checkout.subscription : checkout.subscription?.id ?? null;
-    await upsertSubscription(c.env.DB, {
-      userId,
-      customerId,
-      subscriptionId,
-      status: "active",
-    });
-
     const current = c.get("user");
     if (!current && userId) {
       const minted = await mintSessionForUser(c.env.DB, {
@@ -200,10 +355,16 @@ export function registerBillingRoutes(api: App): void {
     }
     const actorId = c.get("user")?.id ?? userId;
     const row = actorId ? await loadBillingUser(c.env.DB, actorId) : null;
+    const kind = checkoutKind({
+      mode: checkout.mode,
+      subscription: checkout.subscription,
+      metadata: checkout.metadata,
+    });
     return c.json({
       ok: true,
+      kind,
       active: isArchiveActive(row?.stripe_status),
-      status: row?.stripe_status ?? "active",
+      status: row?.stripe_status ?? null,
     });
   });
 
@@ -243,20 +404,7 @@ export function registerBillingRoutes(api: App): void {
 async function handleStripeEvent(db: D1Database, event: Stripe.Event): Promise<void> {
   try {
     if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const userId =
-        (typeof session.client_reference_id === "string" && session.client_reference_id) ||
-        (typeof session.metadata?.brainstormUserId === "string" && session.metadata.brainstormUserId) ||
-        null;
-      const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
-      const subscriptionId =
-        typeof session.subscription === "string" ? session.subscription : session.subscription?.id ?? null;
-      await upsertSubscription(db, {
-        userId,
-        customerId,
-        subscriptionId,
-        status: "active",
-      });
+      await fulfillPaidCheckout(db, event.data.object);
       return;
     }
 
