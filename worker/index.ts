@@ -1,13 +1,13 @@
 /**
  * Brainstorm Worker — mounted at /brainstorm on entangleit.com.
  *
- * Vite dev serves the SPA at the configured `base` (`/brainstorm/`), so we
- * forward the original URL to ASSETS first. Production assets live at the
- * binding root (`/index.html`, `/assets/...`), so on miss we strip the prefix
- * and try again.
+ * Production assets live at the binding root (`/index.html`, `/assets/...`)
+ * while the browser requests `/brainstorm/...`. Always strip the prefix
+ * before ASSETS.fetch. Vite-dev module URLs keep the original request so HMR
+ * still works.
  */
 import { api } from "./api";
-import { APP_PREFIX, stripPrefix } from "./paths";
+import { APP_PREFIX, isViteDevPath, stripPrefix } from "./paths";
 import { ensureSchema } from "./schema";
 import { SessionRoom } from "./session-room";
 
@@ -37,9 +37,11 @@ export default {
 
     if (!env.ASSETS) return new Response("Not found", { status: 404 });
 
-    const direct = await env.ASSETS.fetch(request);
-    if (direct.status !== 404) return direct;
+    if (isViteDevPath(inner) || isViteDevPath(url.pathname)) {
+      return env.ASSETS.fetch(request);
+    }
 
-    return env.ASSETS.fetch(new Request(new URL(inner + url.search, url.origin), request));
+    const assetPath = inner === "/" ? "/index.html" : inner;
+    return env.ASSETS.fetch(new Request(new URL(assetPath + url.search, url.origin), request));
   },
 };
