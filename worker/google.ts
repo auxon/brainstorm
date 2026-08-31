@@ -134,7 +134,9 @@ export function googleAuthorizeUrl(input: {
     code_challenge_method: "S256",
     access_type: "offline",
     prompt: "consent",
-    include_granted_scopes: "true",
+    // Do not set include_granted_scopes. The same Google Cloud client is also
+    // used by StreamMaster (YouTube). Incremental auth would merge
+    // youtube.force-ssl with drive.file, which Google rejects as incompatible.
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }

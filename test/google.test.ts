@@ -149,6 +149,8 @@ describe("oauth helpers", () => {
     expect(url).toContain("drive.file");
     expect(url).toContain("code_challenge_method=S256");
     expect(url).toContain("access_type=offline");
+    expect(url).not.toContain("include_granted_scopes");
+    expect(url).not.toContain("youtube");
     expect(url).toContain(encodeURIComponent("https://entangleit.com/brainstorm/api/auth/google/callback"));
   });
 
