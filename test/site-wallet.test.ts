@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { PrivateKey } from "@bsv/sdk";
+import { P2PKH, PrivateKey } from "@bsv/sdk";
 import { isGuestId, GUEST_PREFIX } from "../worker/auth";
 import {
   buildInscriptionLockingScript,
   buildMintTransaction,
   estimateMintSats,
+  parseMainnetP2pkhAddress,
   satsToBsv,
   siteWalletAddress,
   siteWalletConfigured,
@@ -104,6 +105,23 @@ describe("mint transaction", () => {
     expect(tx.id("hex")).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("locks the inscription to a recipient and change to the site wallet", async () => {
+    const site = PrivateKey.fromRandom();
+    const recipient = PrivateKey.fromRandom().toAddress();
+    const tx = await buildMintTransaction({
+      key: site,
+      recipientAddress: recipient,
+      markdown: "# hello recipient",
+      contentType: "text/markdown",
+      utxos: [{ tx_hash: "aa".repeat(32), tx_pos: 0, value: 5000 }],
+    });
+    const recipHex = new P2PKH().lock(recipient).toHex();
+    const changeHex = new P2PKH().lock(site.toAddress()).toHex();
+    expect(tx.outputs[0].lockingScript.toHex().endsWith(recipHex)).toBe(true);
+    expect(tx.outputs[0].lockingScript.toHex()).toContain("6f7264");
+    expect(tx.outputs[1].lockingScript.toHex()).toBe(changeHex);
+  });
+
   it("still reports the funding shortfall instead of throwing", async () => {
     const key = PrivateKey.fromRandom();
     await expect(
@@ -114,6 +132,20 @@ describe("mint transaction", () => {
         utxos: [{ tx_hash: "aa".repeat(32), tx_pos: 0, value: 10 }],
       }),
     ).rejects.toMatchObject({ status: 503, name: "HttpError" });
+  });
+});
+
+describe("1Sat recipient addresses", () => {
+  it("accepts a mainnet P2PKH address", () => {
+    const address = PrivateKey.fromRandom().toAddress();
+    expect(parseMainnetP2pkhAddress(` ${address} `)).toBe(address);
+  });
+
+  it("rejects empty, testnet-looking, and non-P2PKH strings", () => {
+    expect(() => parseMainnetP2pkhAddress("")).toThrow(/Enter a 1Sat/);
+    expect(() => parseMainnetP2pkhAddress("n4VQ5YdHf7hLQ2g8kS7oHmjKqJqKqJqKqJ")).toThrow(/mainnet/);
+    expect(() => parseMainnetP2pkhAddress("bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4")).toThrow(/starting with 1/);
+    expect(() => parseMainnetP2pkhAddress("1thisisnotvalid")).toThrow(/not a valid/);
   });
 });
 
