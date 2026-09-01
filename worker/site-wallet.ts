@@ -12,8 +12,48 @@ import { nftOriginFromTxid, type BillingEnv } from "./billing-lib";
 const WOC = "https://api.whatsonchain.com/v1/bsv/main";
 /** ~0.05 sat/byte. BSV fees are tiny; this stays above dust for 350KB snapshots. */
 const FEE_SAT_PER_KB = 50;
+const SCRIPT_OVERHEAD_BYTES = 400;
+const MIN_FEE_SATS = 200;
+const ORDINAL_SATS = 1;
+const CHANGE_BUFFER_SATS = 1;
 
-type Utxo = { tx_hash: string; tx_pos: number; value: number };
+export function estimateMintSats(contentBytes: number): {
+  feeSats: number;
+  ordinalSats: number;
+  changeBufferSats: number;
+  neededSats: number;
+} {
+  const feeSats = Math.max(
+    MIN_FEE_SATS,
+    Math.ceil((Math.max(0, contentBytes) + SCRIPT_OVERHEAD_BYTES) / 1000) * FEE_SAT_PER_KB,
+  );
+  return {
+    feeSats,
+    ordinalSats: ORDINAL_SATS,
+    changeBufferSats: CHANGE_BUFFER_SATS,
+    neededSats: ORDINAL_SATS + feeSats + CHANGE_BUFFER_SATS,
+  };
+}
+
+export function satsToBsv(sats: number): string {
+  return (Math.max(0, sats) / 1e8).toFixed(8);
+}
+
+export function siteWalletFundingMessage(opts: {
+  address: string;
+  haveSats: number;
+  neededSats: number;
+  feeSats: number;
+}): string {
+  const shortfall = Math.max(0, opts.neededSats - opts.haveSats);
+  return (
+    `Site wallet has ${opts.haveSats.toLocaleString("en-US")} sats but this inscription needs ` +
+    `${opts.neededSats.toLocaleString("en-US")} sats (${opts.feeSats.toLocaleString("en-US")} sat network fee + 1 sat ordinal). ` +
+    `Send at least ${shortfall.toLocaleString("en-US")} more sats (${satsToBsv(shortfall)} BSV) to ${opts.address}.`
+  );
+}
+
+export type Utxo = { tx_hash: string; tx_pos: number; value: number };
 
 export function siteWalletConfigured(env: BillingEnv): boolean {
   return Boolean(env.SITE_WALLET_WIF?.trim());
@@ -67,6 +107,60 @@ export async function siteWalletStatus(env: BillingEnv): Promise<{
   }
 }
 
+function stubSourceTransaction(outputIndex: number, satoshis: number, lockingScript: LockingScript): Transaction {
+  const source = new Transaction();
+  source.outputs = Array.from({ length: outputIndex + 1 }, () => ({
+    satoshis: 0,
+    lockingScript,
+  }));
+  source.outputs[outputIndex] = { satoshis, lockingScript };
+  return source;
+}
+
+export async function buildMintTransaction(opts: {
+  key: PrivateKey;
+  utxos: Utxo[];
+  markdown: string;
+  contentType: string;
+}): Promise<Transaction> {
+  const address = opts.key.toAddress();
+  const content = new TextEncoder().encode(opts.markdown);
+  const inscriptionScript = buildInscriptionLockingScript(address, content, opts.contentType);
+  const p2pkh = new P2PKH().lock(address);
+  const estimate = estimateMintSats(content.byteLength);
+
+  const tx = new Transaction();
+  let total = 0;
+  for (const u of opts.utxos) {
+    if (u.value <= 0) continue;
+    tx.addInput({
+      sourceTXID: u.tx_hash,
+      sourceOutputIndex: u.tx_pos,
+      sourceTransaction: stubSourceTransaction(u.tx_pos, u.value, p2pkh),
+      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "all", false, u.value, p2pkh),
+    });
+    total += u.value;
+    if (total >= estimate.neededSats) break;
+  }
+  if (tx.inputs.length === 0 || total < estimate.neededSats) {
+    throw new HttpError(
+      503,
+      siteWalletFundingMessage({
+        address,
+        haveSats: total,
+        neededSats: estimate.neededSats,
+        feeSats: estimate.feeSats,
+      }),
+    );
+  }
+
+  tx.addOutput({ lockingScript: inscriptionScript, satoshis: ORDINAL_SATS });
+  tx.addOutput({ lockingScript: p2pkh, change: true });
+  await tx.fee(new SatoshisPerKilobyte(FEE_SAT_PER_KB));
+  await tx.sign();
+  return tx;
+}
+
 export async function inscribeMarkdown(
   env: BillingEnv,
   markdown: string,
@@ -81,41 +175,19 @@ export async function inscribeMarkdown(
   } catch {
     throw new HttpError(503, "Site wallet is not configured");
   }
-  const address = key.toAddress();
-  const utxos = await fetchUtxos(address);
-  const content = new TextEncoder().encode(markdown);
-  const inscriptionScript = buildInscriptionLockingScript(address, content, contentType);
-  const p2pkh = new P2PKH().lock(address);
-  const approxFee = Math.max(200, Math.ceil((content.byteLength + 400) / 1000) * FEE_SAT_PER_KB);
-  const needed = 1 + approxFee + 1;
-
-  const tx = new Transaction();
-  let total = 0;
-  for (const u of utxos) {
-    if (u.value <= 0) continue;
-    tx.addInput({
-      sourceTXID: u.tx_hash,
-      sourceOutputIndex: u.tx_pos,
-      unlockingScriptTemplate: new P2PKH().unlock(key, "all", false, u.value, p2pkh),
-    });
-    total += u.value;
-    if (total >= needed) break;
+  try {
+    const address = key.toAddress();
+    const utxos = await fetchUtxos(address);
+    const tx = await buildMintTransaction({ key, utxos, markdown, contentType });
+    const hex = tx.toHex();
+    const signedId = tx.id("hex");
+    const txid = (await broadcastRaw(hex, signedId)).toLowerCase();
+    return { txid, origin: nftOriginFromTxid(txid) };
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    const message = err instanceof Error && err.message ? err.message : "unknown inscription error";
+    throw new HttpError(502, `Inscription failed: ${message}`);
   }
-  if (tx.inputs.length === 0 || total < needed) {
-    throw new HttpError(
-      503,
-      `Site wallet needs BSV to inscribe. Send sats to ${address}`,
-    );
-  }
-
-  tx.addOutput({ lockingScript: inscriptionScript, satoshis: 1 });
-  tx.addOutput({ lockingScript: p2pkh, change: true });
-  await tx.fee(new SatoshisPerKilobyte(FEE_SAT_PER_KB));
-  await tx.sign();
-  const hex = tx.toHex();
-  const signedId = tx.id("hex");
-  const txid = (await broadcastRaw(hex, signedId)).toLowerCase();
-  return { txid, origin: nftOriginFromTxid(txid) };
 }
 
 async function fetchUtxos(address: string): Promise<Utxo[]> {

@@ -15,8 +15,8 @@ export function WalletButton({ className }: { className?: string }) {
     return <div className={cn("h-9 w-28 animate-pulse rounded-lg bg-raised", className)} />;
   }
 
-  if (user) {
-    const label = user.isGuest ? "Guest" : shortHex(user.displayName || user.id);
+  if (user && !user.isGuest) {
+    const label = user.displayName || user.email || shortHex(user.id);
     return (
       <button
         type="button"
@@ -34,8 +34,12 @@ export function WalletButton({ className }: { className?: string }) {
           className,
         )}
       >
-        <Wallet className="size-3.5 shrink-0" strokeWidth={1.8} />
-        <span className="truncate font-mono">{label}</span>
+        {user.picture ? (
+          <img src={user.picture} alt="" className="size-4 rounded-full" referrerPolicy="no-referrer" />
+        ) : (
+          <Wallet className="size-3.5 shrink-0" strokeWidth={1.8} />
+        )}
+        <span className="truncate">{label}</span>
         {session?.balance ? (
           <span className="hidden font-mono text-muted sm:inline">{formatSats(session.balance.satoshis)}</span>
         ) : null}
@@ -50,10 +54,9 @@ export function WalletButton({ className }: { className?: string }) {
         "inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-raised px-3 text-xs text-muted hover:text-fg",
         className,
       )}
-      title="Optional BSV identity for sat boosts"
+      title="Sign in with Google or an optional BSV wallet"
     >
-      <Wallet className="size-3.5" strokeWidth={1.8} />
-      BSV (optional)
+      Sign in
     </Link>
   );
 }

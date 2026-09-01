@@ -4,8 +4,12 @@ export type WalletUser = {
   address: string | null;
   handle: string | null;
   displayName: string | null;
+  email: string | null;
+  picture: string | null;
   /** Cookie identity minted without Yours Wallet. */
   isGuest: boolean;
+  /** Google account linked (Drive + sign-in). */
+  googleConnected: boolean;
 };
 
 export type SessionRow = {

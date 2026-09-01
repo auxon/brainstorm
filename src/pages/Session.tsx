@@ -7,6 +7,7 @@ import { IdeaBoard } from "@/components/IdeaBoard";
 import { MindMap } from "@/components/MindMap";
 import { ShareDialog } from "@/components/ShareDialog";
 import { ExportMenu } from "@/components/ExportMenu";
+import { DriveMenu } from "@/components/DriveMenu";
 import { MintNftButton } from "@/components/MintNftButton";
 import { FeatureButton } from "@/components/FeatureButton";
 import { apiFetch, rememberSession, saveEditToken, type SessionGraph } from "@/lib/api";
@@ -55,6 +56,12 @@ export function SessionPage() {
   }, [graph?.session.id, slug]);
 
   useEffect(() => {
+    if (params.get("google") === "connected") {
+      void refreshSession().then(() => toast.success("Signed in with Google"));
+      const cleanedGoogle = new URLSearchParams(params);
+      cleanedGoogle.delete("google");
+      setParams(cleanedGoogle, { replace: true });
+    }
     const featureOk = params.get("feature") === "success";
     const boostOk = params.get("boost") === "success";
     const sessionId = params.get("session_id");
@@ -137,6 +144,7 @@ export function SessionPage() {
             <Share2 className="size-3.5" /> Share
           </button>
           <ExportMenu slug={slug} />
+          <DriveMenu slug={slug} canEdit={graph.session.canEdit} />
           <FeatureButton
             slug={slug}
             featuredUntil={graph.session.featuredUntil}

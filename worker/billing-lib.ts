@@ -78,6 +78,23 @@ export function stripeEnvLivemode(env: BillingEnv): boolean | null {
   return stripeKeyLivemode(env.STRIPE_SECRET_KEY) ?? stripeKeyLivemode(env.STRIPE_PUBLISHABLE_KEY);
 }
 
+/** Test-mode (or other-account) customer ids fail live Checkout with resource_missing. */
+export function isStripeMissingResource(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: string; message?: string };
+  if (e.code === "resource_missing") return true;
+  return typeof e.message === "string" && /no such (customer|price|subscription)/i.test(e.message);
+}
+
+export function stripeErrorMessage(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+  const e = err as { type?: string; rawType?: string; message?: string };
+  if (typeof e.message === "string" && (e.type || e.rawType || isStripeMissingResource(err))) {
+    return e.message;
+  }
+  return null;
+}
+
 /**
  * Archive line items. Live keys cannot use a test-mode catalog price, so live
  * (and any env without STRIPE_PRICE_ID) uses ad-hoc `price_data`.

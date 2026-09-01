@@ -6,6 +6,7 @@ import { ExploreCard } from "@/components/ExploreCard";
 import { apiFetch, fetchExplore, listRecent, rememberSession, saveEditToken, type ExploreBoard, type PublicSession } from "@/lib/api";
 import { refreshSession, useSession } from "@/lib/auth";
 import { FEATURE_DAYS, FEATURE_USD } from "@/lib/billing";
+import { fetchGoogleStatus, googleStartUrl, importDriveFile, listDriveFiles, type DriveFileCard } from "@/lib/google";
 
 export function HomePage() {
   const { user, isPending } = useSession();
@@ -14,6 +15,8 @@ export function HomePage() {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [featured, setFeatured] = useState<ExploreBoard[]>([]);
+  const [driveFiles, setDriveFiles] = useState<DriveFileCard[]>([]);
+  const [googleConnected, setGoogleConnected] = useState(false);
   const recent = listRecent();
 
   useEffect(() => {
@@ -21,6 +24,30 @@ export function HomePage() {
       .then((data) => setFeatured(data.featured))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("google") === "connected") {
+      void refreshSession().then(() => {
+        toast.success("Signed in with Google. Boards can save to Drive.");
+        params.delete("google");
+        const next = params.toString();
+        window.history.replaceState(null, "", `${window.location.pathname}${next ? `?${next}` : ""}`);
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchGoogleStatus()
+      .then((status) => {
+        setGoogleConnected(status.connected);
+        if (status.connected) {
+          return listDriveFiles().then(setDriveFiles);
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+  }, [user?.id, user?.googleConnected]);
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -86,15 +113,19 @@ export function HomePage() {
             {busy ? "Creating…" : "Create session"}
           </button>
         </form>
-        {user?.isGuest ? (
+        {!user?.googleConnected ? (
           <p className="mt-3 text-xs text-muted">
-            You are browsing as Guest.{" "}
-            <Link to="/login" className="text-accent hover:underline">
-              Optional BSV wallet
-            </Link>{" "}
-            is only for on-chain sat boosts. USD boosts use Stripe.
+            <a href={googleStartUrl("/")} className="text-accent hover:underline">
+              Sign in with Google
+            </a>{" "}
+            to save mind maps to Drive. A BSV wallet is only needed for sat boosts.
           </p>
-        ) : null}
+        ) : (
+          <p className="mt-3 text-xs text-muted">
+            Signed in as {user.displayName || user.email}. New boards you create can be saved to a{" "}
+            <span className="text-fg">Brainstorm</span> folder on Google Drive.
+          </p>
+        )}
         {featured.length ? (
           <section className="mt-10">
             <div className="flex items-baseline justify-between gap-2">
@@ -108,6 +139,33 @@ export function HomePage() {
                 <ExploreCard key={board.slug} board={board} featured />
               ))}
             </div>
+          </section>
+        ) : null}
+        {googleConnected && driveFiles.length ? (
+          <section className="mt-10">
+            <h2 className="text-sm uppercase tracking-wider text-muted">On Google Drive</h2>
+            <ul className="mt-3 space-y-2">
+              {driveFiles.map((file) => (
+                <li key={file.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void importDriveFile(file.id)
+                        .then((imported) => {
+                          saveEditToken(imported.session.slug, imported.editToken);
+                          rememberSession(imported.session.slug, imported.session.title);
+                          navigate(`/s/${imported.session.slug}`);
+                        })
+                        .catch((err) => toast.error(err instanceof Error ? err.message : "Could not open Drive file"));
+                    }}
+                    className="block w-full rounded-lg border border-border bg-raised px-4 py-3 text-left hover:border-accent/40"
+                  >
+                    {file.name.replace(/\.brainstorm\.json$/i, "")}
+                    <span className="ml-2 font-mono text-xs text-muted">Drive</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           </section>
         ) : null}
         {recent.length ? (

@@ -47,6 +47,7 @@ export const MCP_INSTRUCTIONS = [
   "Brainstorm is a collaborative idea board and mind map.",
   "Public UI: https://entangleit.com/brainstorm/",
   "Humans do not need Yours Wallet. Guest cookies / session_create tokens are enough for boards, votes, Stripe Archive, and NFT mints.",
+  "Google sign-in and Drive save/load are browser OAuth flows (drive.file). Agents keep using session tokens; they do not receive Google refresh tokens.",
   "Yours is optional and server-side: pair yours-agent only if this agent should use the site BSV identity (sat boosts, funding the treasury).",
   "Pairing: 1) auth_challenge 2) yours-agent sign_message on the challenge 3) auth_verify 4) pass token on write tools.",
   "Or skip pairing: session_create without token mints a guest identity and returns token + editToken.",
