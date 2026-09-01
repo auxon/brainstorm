@@ -55,7 +55,7 @@ export const MCP_INSTRUCTIONS = [
   "vote records an upvote. Sat boosts from a personal wallet still use yours-agent send_bsv then vote with satoshis and txid.",
   "USD boosts ($1 / $3 / $5) use billing_boost — Stripe Checkout URL, platform keeps USD. Do not drain the site wallet to pay authors.",
   "Featured boards ($29 / 7 days) use billing_feature (edit access required). explore lists featured + public boards.",
-  "Archive ($9/mo Stripe) unlocks minting. billing_checkout returns a Checkout URL (human pays in a browser). nft_mint inscribes via the Brainstorm site wallet — do not use Yours in the browser.",
+  "Archive ($9/mo Stripe) unlocks minting. billing_checkout returns a Checkout URL (human pays in a browser). nft_mint inscribes via the Brainstorm site wallet to a 1Sat P2PKH address you pass as recipient — do not use Yours in the browser to inscribe.",
 ].join("\n");
 
 type ToolResult = {
@@ -519,17 +519,22 @@ export function createBrainstormMcpServer(env: Env, ctx: ExecutionContext, origi
     {
       title: "Mint NFT (site wallet)",
       description:
-        "Inscribe the session Markdown as a 1Sat Ordinal using the Brainstorm site wallet. Requires Archive + edit access. Does not use Yours Wallet in the browser.",
+        "Inscribe the session Markdown as a 1Sat Ordinal using the Brainstorm site wallet. Requires Archive + edit access. Pass recipient (a mainnet P2PKH address starting with 1) so the NFT lands in that wallet; otherwise it stays in the site wallet.",
       inputSchema: z.object({
         slug: slugField,
         token: tokenField.optional(),
         editToken: editTokenField,
+        recipient: z
+          .string()
+          .optional()
+          .describe("Mainnet 1Sat Ordinals P2PKH address starting with 1. Yours Wallet ordinals / 1Sat deposit address."),
       }),
     },
-    async ({ slug, token, editToken }) => {
+    async ({ slug, token, editToken, recipient }) => {
       const { status, json } = await call("POST", `/sessions/${encodeURIComponent(slug)}/nft/mint`, {
         token,
         editToken,
+        body: recipient ? { recipient } : {},
       });
       return graphOk(status, json);
     },
