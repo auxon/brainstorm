@@ -86,7 +86,7 @@ export function BillingPage() {
         <p className="mt-3 text-muted">
           Archive is ${status?.amountUsd ?? 9}/{status?.interval ?? "month"} via Stripe. No Yours Wallet needed —
           while Archive is active, the Brainstorm site wallet inscribes any board you can edit as a 1Sat
-          Ordinal. Featured boards (${status?.featureUsd ?? 29} / {status?.featureDays ?? 7} days) and $1 / $3 / $5
+          Ordinal to a 1Sat address you choose. Featured boards (${status?.featureUsd ?? 29} / {status?.featureDays ?? 7} days) and $1 / $3 / $5
           idea boosts are one-time Stripe Checkout payments — they do not start an Archive subscription.
         </p>
         <div className="mt-8 rounded-2xl border border-border bg-raised p-5">
@@ -99,7 +99,7 @@ export function BillingPage() {
             <span className="text-base font-normal text-muted">/{status?.interval ?? "month"}</span>
           </p>
           <ul className="mt-4 space-y-2 text-sm text-muted">
-            <li>Site wallet mints the current board as a 1Sat Ordinal NFT</li>
+            <li>You pick the 1Sat address that receives the NFT; the site wallet only pays the fee</li>
             <li>Origin + txid stored on the session</li>
             <li>Cancel anytime in the Stripe customer portal</li>
             <li>Featured ($29 / 7 days) and $1–$5 boosts are separate one-off payments</li>

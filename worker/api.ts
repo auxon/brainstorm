@@ -563,14 +563,27 @@ api.post("/sessions/:slug/nft/mint", async (c) => {
   const bytes = new TextEncoder().encode(markdown).byteLength;
   if (bytes > NFT_MAX_BYTES) throw new HttpError(413, "Session is too large to inscribe in a single ordinal");
   const contentHash = await sha256Hex(markdown);
-  const minted = await inscribeMarkdown(c.env as BillingEnv, markdown, NFT_CONTENT_TYPE, {
-    app: "brainstorm",
-    type: "brainstorm-session",
-    slug: graph.session.slug,
-    title: graph.session.title,
-    url: `https://entangleit.com/brainstorm/s/${graph.session.slug}`,
-    sha256: contentHash,
-  });
+  const body = await readJson(c.req.raw);
+  const recipientRaw =
+    typeof body.recipient === "string"
+      ? body.recipient
+      : typeof body.ordAddress === "string"
+        ? body.ordAddress
+        : "";
+  const minted = await inscribeMarkdown(
+    c.env as BillingEnv,
+    markdown,
+    NFT_CONTENT_TYPE,
+    {
+      app: "brainstorm",
+      type: "brainstorm-session",
+      slug: graph.session.slug,
+      title: graph.session.title,
+      url: `https://entangleit.com/brainstorm/s/${graph.session.slug}`,
+      sha256: contentHash,
+    },
+    recipientRaw,
+  );
   const existing = await c.env.DB.prepare("SELECT id FROM nfts WHERE txid = ?").bind(minted.txid).first();
   if (!existing) {
     await c.env.DB.prepare(
@@ -582,7 +595,13 @@ api.post("/sessions/:slug/nft/mint", async (c) => {
   await touch(c.env.DB, graph.session.id);
   await broadcast(c, graph.session.id, { type: "nft.mint", txid: minted.txid, origin: minted.origin });
   const next = await loadGraph(c);
-  return c.json({ ...next, txid: minted.txid, origin: minted.origin, contentHash });
+  return c.json({
+    ...next,
+    txid: minted.txid,
+    origin: minted.origin,
+    contentHash,
+    recipient: minted.recipient,
+  });
 });
 
 registerBillingRoutes(api);
