@@ -12,6 +12,46 @@ import { nftOriginFromTxid, type BillingEnv } from "./billing-lib";
 const WOC = "https://api.whatsonchain.com/v1/bsv/main";
 /** ~0.05 sat/byte. BSV fees are tiny; this stays above dust for 350KB snapshots. */
 const FEE_SAT_PER_KB = 50;
+const SCRIPT_OVERHEAD_BYTES = 400;
+const MIN_FEE_SATS = 200;
+const ORDINAL_SATS = 1;
+const CHANGE_BUFFER_SATS = 1;
+
+export function estimateMintSats(contentBytes: number): {
+  feeSats: number;
+  ordinalSats: number;
+  changeBufferSats: number;
+  neededSats: number;
+} {
+  const feeSats = Math.max(
+    MIN_FEE_SATS,
+    Math.ceil((Math.max(0, contentBytes) + SCRIPT_OVERHEAD_BYTES) / 1000) * FEE_SAT_PER_KB,
+  );
+  return {
+    feeSats,
+    ordinalSats: ORDINAL_SATS,
+    changeBufferSats: CHANGE_BUFFER_SATS,
+    neededSats: ORDINAL_SATS + feeSats + CHANGE_BUFFER_SATS,
+  };
+}
+
+export function satsToBsv(sats: number): string {
+  return (Math.max(0, sats) / 1e8).toFixed(8);
+}
+
+export function siteWalletFundingMessage(opts: {
+  address: string;
+  haveSats: number;
+  neededSats: number;
+  feeSats: number;
+}): string {
+  const shortfall = Math.max(0, opts.neededSats - opts.haveSats);
+  return (
+    `Site wallet has ${opts.haveSats.toLocaleString("en-US")} sats but this inscription needs ` +
+    `${opts.neededSats.toLocaleString("en-US")} sats (${opts.feeSats.toLocaleString("en-US")} sat network fee + 1 sat ordinal). ` +
+    `Send at least ${shortfall.toLocaleString("en-US")} more sats (${satsToBsv(shortfall)} BSV) to ${opts.address}.`
+  );
+}
 
 type Utxo = { tx_hash: string; tx_pos: number; value: number };
 
@@ -86,8 +126,7 @@ export async function inscribeMarkdown(
   const content = new TextEncoder().encode(markdown);
   const inscriptionScript = buildInscriptionLockingScript(address, content, contentType);
   const p2pkh = new P2PKH().lock(address);
-  const approxFee = Math.max(200, Math.ceil((content.byteLength + 400) / 1000) * FEE_SAT_PER_KB);
-  const needed = 1 + approxFee + 1;
+  const estimate = estimateMintSats(content.byteLength);
 
   const tx = new Transaction();
   let total = 0;
@@ -99,12 +138,17 @@ export async function inscribeMarkdown(
       unlockingScriptTemplate: new P2PKH().unlock(key, "all", false, u.value, p2pkh),
     });
     total += u.value;
-    if (total >= needed) break;
+    if (total >= estimate.neededSats) break;
   }
-  if (tx.inputs.length === 0 || total < needed) {
+  if (tx.inputs.length === 0 || total < estimate.neededSats) {
     throw new HttpError(
       503,
-      `Site wallet needs BSV to inscribe. Send sats to ${address}`,
+      siteWalletFundingMessage({
+        address,
+        haveSats: total,
+        neededSats: estimate.neededSats,
+        feeSats: estimate.feeSats,
+      }),
     );
   }
 

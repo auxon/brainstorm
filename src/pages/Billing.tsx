@@ -153,6 +153,8 @@ export function BillingPage() {
               </>
             ) : null}
             {wallet.satoshis != null ? ` · ${wallet.satoshis.toLocaleString()} sats` : null}.
+            Inscriptions cost 1 sat plus about 0.05 sat per byte (200 sat fee minimum), so a large
+            board can need tens of thousands of sats.
           </p>
         ) : (
           <p className="mt-4 text-xs text-muted">

@@ -29,7 +29,7 @@ import {
 } from "./google";
 import { importDriveFile, listDriveFiles, saveGraphToDrive } from "./drive";
 import { NFT_CONTENT_TYPE, NFT_MAX_BYTES, nftOriginFromTxid, type BillingEnv } from "./billing-lib";
-import { inscribeMarkdown } from "./site-wallet";
+import { estimateMintSats, inscribeMarkdown } from "./site-wallet";
 import { activeFeaturedUntil } from "./commerce";
 import type { CommentRow, EdgeRow, IdeaRow, SessionGraph, SessionNft, SessionRow, WalletUser } from "./types";
 import { HttpError } from "./types";
@@ -501,11 +501,14 @@ api.post("/sessions/:slug/nft/prepare", async (c) => {
   const bytes = new TextEncoder().encode(markdown).byteLength;
   if (bytes > NFT_MAX_BYTES) throw new HttpError(413, "Session is too large to inscribe in a single ordinal");
   const contentHash = await sha256Hex(markdown);
+  const estimate = estimateMintSats(bytes);
   return c.json({
     markdown,
     contentHash,
     contentType: NFT_CONTENT_TYPE,
     bytes,
+    feeSats: estimate.feeSats,
+    neededSats: estimate.neededSats,
     map: {
       app: "brainstorm",
       type: "brainstorm-session",
