@@ -31,4 +31,24 @@ export type NftPrepare = {
   contentType: string;
   bytes: number;
   map: Record<string, string>;
+  feeSats?: number;
+  neededSats?: number;
 };
+
+export function siteWalletShortfallMessage(opts: {
+  address: string;
+  haveSats: number;
+  neededSats: number;
+  feeSats?: number;
+}): string {
+  const shortfall = Math.max(0, opts.neededSats - opts.haveSats);
+  const feeBit =
+    opts.feeSats != null
+      ? ` (${opts.feeSats.toLocaleString("en-US")} sat network fee + 1 sat ordinal)`
+      : "";
+  return (
+    `Site wallet has ${opts.haveSats.toLocaleString("en-US")} sats but this inscription needs ` +
+    `${opts.neededSats.toLocaleString("en-US")} sats${feeBit}. ` +
+    `Send at least ${shortfall.toLocaleString("en-US")} more sats (${(shortfall / 1e8).toFixed(8)} BSV) to ${opts.address}.`
+  );
+}

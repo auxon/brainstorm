@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { PrivateKey } from "@bsv/sdk";
 import { isGuestId, GUEST_PREFIX } from "../worker/auth";
-import { buildInscriptionLockingScript, siteWalletConfigured, siteWalletAddress } from "../worker/site-wallet";
+import {
+  buildInscriptionLockingScript,
+  estimateMintSats,
+  satsToBsv,
+  siteWalletAddress,
+  siteWalletConfigured,
+  siteWalletFundingMessage,
+} from "../worker/site-wallet";
 import { isArchiveActive, type BillingEnv } from "../worker/billing-lib";
 
 describe("guest identity", () => {
@@ -25,6 +32,48 @@ describe("site wallet inscription script", () => {
   it("does not treat an empty env as configured", () => {
     expect(siteWalletConfigured({} as BillingEnv)).toBe(false);
     expect(siteWalletAddress({} as BillingEnv)).toBeNull();
+  });
+});
+
+describe("mint funding estimate", () => {
+  it("uses the 200 sat fee floor for small snapshots", () => {
+    expect(estimateMintSats(0)).toEqual({
+      feeSats: 200,
+      ordinalSats: 1,
+      changeBufferSats: 1,
+      neededSats: 202,
+    });
+    expect(estimateMintSats(1600)).toEqual({
+      feeSats: 200,
+      ordinalSats: 1,
+      changeBufferSats: 1,
+      neededSats: 202,
+    });
+  });
+
+  it("scales fee with inscription size", () => {
+    expect(estimateMintSats(3601).feeSats).toBe(250);
+    expect(estimateMintSats(350_000)).toEqual({
+      feeSats: 17_550,
+      ordinalSats: 1,
+      changeBufferSats: 1,
+      neededSats: 17_552,
+    });
+  });
+
+  it("tells the operator how many sats and BSV to send", () => {
+    expect(satsToBsv(17_501)).toBe("0.00017501");
+    expect(
+      siteWalletFundingMessage({
+        address: "13PXVeiAmSygGKFj79JCh59VEk2jLct4Xq",
+        haveSats: 500,
+        neededSats: 17_552,
+        feeSats: 17_550,
+      }),
+    ).toBe(
+      "Site wallet has 500 sats but this inscription needs 17,552 sats (17,550 sat network fee + 1 sat ordinal). " +
+        "Send at least 17,052 more sats (0.00017052 BSV) to 13PXVeiAmSygGKFj79JCh59VEk2jLct4Xq.",
+    );
   });
 });
 

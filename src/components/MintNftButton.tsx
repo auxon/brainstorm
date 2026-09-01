@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Diamond } from "lucide-react";
 import { apiFetch, type SessionGraph, type SessionNft } from "@/lib/api";
-import type { BillingStatus } from "@/lib/billing";
+import { siteWalletShortfallMessage, type BillingStatus, type NftPrepare } from "@/lib/billing";
 import { refreshSession } from "@/lib/auth";
 
 export function MintNftButton({
@@ -30,6 +30,27 @@ export function MintNftButton({
       if (!billing.active) {
         toast.message("Archive ($9/mo) unlocks NFT minting");
         navigate("/billing");
+        return;
+      }
+      const prepare = await apiFetch<NftPrepare>(`/sessions/${slug}/nft/prepare`, { method: "POST" }, slug);
+      const have = billing.siteWallet?.satoshis;
+      const address = billing.siteWallet?.address;
+      if (
+        billing.siteWallet?.configured &&
+        address &&
+        typeof have === "number" &&
+        typeof prepare.neededSats === "number" &&
+        have < prepare.neededSats
+      ) {
+        toast.error(
+          siteWalletShortfallMessage({
+            address,
+            haveSats: have,
+            neededSats: prepare.neededSats,
+            feeSats: prepare.feeSats,
+          }),
+          { duration: 20_000 },
+        );
         return;
       }
       toast.message("Inscribing with the Brainstorm site wallet…");
