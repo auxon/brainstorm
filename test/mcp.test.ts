@@ -106,6 +106,7 @@ describe("mcpDiscovery", () => {
     expect(doc.tools).toEqual([...MCP_TOOLS]);
     expect(MCP_INSTRUCTIONS).toContain("yours-agent");
     expect(MCP_INSTRUCTIONS).toContain("billing_boost");
+    expect(MCP_INSTRUCTIONS).toContain("recipient");
     expect(MCP_TOOLS).toContain("explore");
     expect(MCP_TOOLS).toContain("billing_feature");
     expect(MCP_TOOLS).toContain("billing_boost");
