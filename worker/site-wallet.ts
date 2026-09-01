@@ -53,7 +53,7 @@ export function siteWalletFundingMessage(opts: {
   );
 }
 
-type Utxo = { tx_hash: string; tx_pos: number; value: number };
+export type Utxo = { tx_hash: string; tx_pos: number; value: number };
 
 export function siteWalletConfigured(env: BillingEnv): boolean {
   return Boolean(env.SITE_WALLET_WIF?.trim());
@@ -107,35 +107,37 @@ export async function siteWalletStatus(env: BillingEnv): Promise<{
   }
 }
 
-export async function inscribeMarkdown(
-  env: BillingEnv,
-  markdown: string,
-  contentType: string,
-  _map: Record<string, string>,
-): Promise<{ txid: string; origin: string }> {
-  const wif = env.SITE_WALLET_WIF?.trim();
-  if (!wif) throw new HttpError(503, "Site wallet is not configured");
-  let key: PrivateKey;
-  try {
-    key = PrivateKey.fromWif(wif);
-  } catch {
-    throw new HttpError(503, "Site wallet is not configured");
-  }
-  const address = key.toAddress();
-  const utxos = await fetchUtxos(address);
-  const content = new TextEncoder().encode(markdown);
-  const inscriptionScript = buildInscriptionLockingScript(address, content, contentType);
+function stubSourceTransaction(outputIndex: number, satoshis: number, lockingScript: LockingScript): Transaction {
+  const source = new Transaction();
+  source.outputs = Array.from({ length: outputIndex + 1 }, () => ({
+    satoshis: 0,
+    lockingScript,
+  }));
+  source.outputs[outputIndex] = { satoshis, lockingScript };
+  return source;
+}
+
+export async function buildMintTransaction(opts: {
+  key: PrivateKey;
+  utxos: Utxo[];
+  markdown: string;
+  contentType: string;
+}): Promise<Transaction> {
+  const address = opts.key.toAddress();
+  const content = new TextEncoder().encode(opts.markdown);
+  const inscriptionScript = buildInscriptionLockingScript(address, content, opts.contentType);
   const p2pkh = new P2PKH().lock(address);
   const estimate = estimateMintSats(content.byteLength);
 
   const tx = new Transaction();
   let total = 0;
-  for (const u of utxos) {
+  for (const u of opts.utxos) {
     if (u.value <= 0) continue;
     tx.addInput({
       sourceTXID: u.tx_hash,
       sourceOutputIndex: u.tx_pos,
-      unlockingScriptTemplate: new P2PKH().unlock(key, "all", false, u.value, p2pkh),
+      sourceTransaction: stubSourceTransaction(u.tx_pos, u.value, p2pkh),
+      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "all", false, u.value, p2pkh),
     });
     total += u.value;
     if (total >= estimate.neededSats) break;
@@ -152,14 +154,40 @@ export async function inscribeMarkdown(
     );
   }
 
-  tx.addOutput({ lockingScript: inscriptionScript, satoshis: 1 });
+  tx.addOutput({ lockingScript: inscriptionScript, satoshis: ORDINAL_SATS });
   tx.addOutput({ lockingScript: p2pkh, change: true });
   await tx.fee(new SatoshisPerKilobyte(FEE_SAT_PER_KB));
   await tx.sign();
-  const hex = tx.toHex();
-  const signedId = tx.id("hex");
-  const txid = (await broadcastRaw(hex, signedId)).toLowerCase();
-  return { txid, origin: nftOriginFromTxid(txid) };
+  return tx;
+}
+
+export async function inscribeMarkdown(
+  env: BillingEnv,
+  markdown: string,
+  contentType: string,
+  _map: Record<string, string>,
+): Promise<{ txid: string; origin: string }> {
+  const wif = env.SITE_WALLET_WIF?.trim();
+  if (!wif) throw new HttpError(503, "Site wallet is not configured");
+  let key: PrivateKey;
+  try {
+    key = PrivateKey.fromWif(wif);
+  } catch {
+    throw new HttpError(503, "Site wallet is not configured");
+  }
+  try {
+    const address = key.toAddress();
+    const utxos = await fetchUtxos(address);
+    const tx = await buildMintTransaction({ key, utxos, markdown, contentType });
+    const hex = tx.toHex();
+    const signedId = tx.id("hex");
+    const txid = (await broadcastRaw(hex, signedId)).toLowerCase();
+    return { txid, origin: nftOriginFromTxid(txid) };
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    const message = err instanceof Error && err.message ? err.message : "unknown inscription error";
+    throw new HttpError(502, `Inscription failed: ${message}`);
+  }
 }
 
 async function fetchUtxos(address: string): Promise<Utxo[]> {

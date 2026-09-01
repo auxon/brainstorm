@@ -3,6 +3,7 @@ import { PrivateKey } from "@bsv/sdk";
 import { isGuestId, GUEST_PREFIX } from "../worker/auth";
 import {
   buildInscriptionLockingScript,
+  buildMintTransaction,
   estimateMintSats,
   satsToBsv,
   siteWalletAddress,
@@ -74,6 +75,45 @@ describe("mint funding estimate", () => {
       "Site wallet has 500 sats but this inscription needs 17,552 sats (17,550 sat network fee + 1 sat ordinal). " +
         "Send at least 17,052 more sats (0.00017052 BSV) to 13PXVeiAmSygGKFj79JCh59VEk2jLct4Xq.",
     );
+  });
+});
+
+describe("mint transaction", () => {
+  it("fees and signs without a full source transaction (the live 500)", async () => {
+    const key = PrivateKey.fromRandom();
+    const tx = await buildMintTransaction({
+      key,
+      markdown: "# StreamMaster Pro\n\n".repeat(80),
+      contentType: "text/markdown",
+      utxos: [
+        {
+          tx_hash: "28ea2dd15e2f55c00dab56867f96d75b12ac62e6bcd881f8c6e4e93e28ec0981",
+          tx_pos: 0,
+          value: 500,
+        },
+        {
+          tx_hash: "908ab28289ec6b9c6035e5f76606d23211adbd32c102599b0b49df504fc865dc",
+          tx_pos: 1,
+          value: 5000,
+        },
+      ],
+    });
+    expect(tx.inputs.length).toBeGreaterThan(0);
+    const hex = tx.toHex();
+    expect(hex.length).toBeGreaterThan(200);
+    expect(tx.id("hex")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("still reports the funding shortfall instead of throwing", async () => {
+    const key = PrivateKey.fromRandom();
+    await expect(
+      buildMintTransaction({
+        key,
+        markdown: "# tiny",
+        contentType: "text/markdown",
+        utxos: [{ tx_hash: "aa".repeat(32), tx_pos: 0, value: 10 }],
+      }),
+    ).rejects.toMatchObject({ status: 503, name: "HttpError" });
   });
 });
 
