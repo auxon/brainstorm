@@ -59,6 +59,28 @@ export function siteWalletConfigured(env: BillingEnv): boolean {
   return Boolean(env.SITE_WALLET_WIF?.trim());
 }
 
+export function parseMainnetP2pkhAddress(raw: string): string {
+  const address = raw.trim();
+  if (!address) {
+    throw new HttpError(400, "Enter a 1Sat Ordinals address (BSV P2PKH, starts with 1).");
+  }
+  if (address.startsWith("m") || address.startsWith("n") || address.startsWith("2")) {
+    throw new HttpError(400, "Use a mainnet 1Sat address starting with 1, not a testnet address.");
+  }
+  if (!address.startsWith("1")) {
+    throw new HttpError(
+      400,
+      "1Sat Ordinals need a mainnet P2PKH address starting with 1 (Yours Wallet → Ordinals / 1Sat deposit address).",
+    );
+  }
+  try {
+    new P2PKH().lock(address);
+  } catch {
+    throw new HttpError(400, "That is not a valid 1Sat / BSV P2PKH address.");
+  }
+  return address;
+}
+
 export function siteWalletAddress(env: BillingEnv): string | null {
   const wif = env.SITE_WALLET_WIF?.trim();
   if (!wif) return null;
@@ -122,11 +144,15 @@ export async function buildMintTransaction(opts: {
   utxos: Utxo[];
   markdown: string;
   contentType: string;
+  recipientAddress?: string | null;
 }): Promise<Transaction> {
-  const address = opts.key.toAddress();
+  const changeAddress = opts.key.toAddress();
+  const recipient = opts.recipientAddress?.trim()
+    ? parseMainnetP2pkhAddress(opts.recipientAddress)
+    : changeAddress;
   const content = new TextEncoder().encode(opts.markdown);
-  const inscriptionScript = buildInscriptionLockingScript(address, content, opts.contentType);
-  const p2pkh = new P2PKH().lock(address);
+  const inscriptionScript = buildInscriptionLockingScript(recipient, content, opts.contentType);
+  const changeLock = new P2PKH().lock(changeAddress);
   const estimate = estimateMintSats(content.byteLength);
 
   const tx = new Transaction();
@@ -136,8 +162,8 @@ export async function buildMintTransaction(opts: {
     tx.addInput({
       sourceTXID: u.tx_hash,
       sourceOutputIndex: u.tx_pos,
-      sourceTransaction: stubSourceTransaction(u.tx_pos, u.value, p2pkh),
-      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "all", false, u.value, p2pkh),
+      sourceTransaction: stubSourceTransaction(u.tx_pos, u.value, changeLock),
+      unlockingScriptTemplate: new P2PKH().unlock(opts.key, "all", false, u.value, changeLock),
     });
     total += u.value;
     if (total >= estimate.neededSats) break;
@@ -146,7 +172,7 @@ export async function buildMintTransaction(opts: {
     throw new HttpError(
       503,
       siteWalletFundingMessage({
-        address,
+        address: changeAddress,
         haveSats: total,
         neededSats: estimate.neededSats,
         feeSats: estimate.feeSats,
@@ -155,7 +181,7 @@ export async function buildMintTransaction(opts: {
   }
 
   tx.addOutput({ lockingScript: inscriptionScript, satoshis: ORDINAL_SATS });
-  tx.addOutput({ lockingScript: p2pkh, change: true });
+  tx.addOutput({ lockingScript: changeLock, change: true });
   await tx.fee(new SatoshisPerKilobyte(FEE_SAT_PER_KB));
   await tx.sign();
   return tx;
@@ -166,7 +192,8 @@ export async function inscribeMarkdown(
   markdown: string,
   contentType: string,
   _map: Record<string, string>,
-): Promise<{ txid: string; origin: string }> {
+  recipientAddress?: string | null,
+): Promise<{ txid: string; origin: string; recipient: string }> {
   const wif = env.SITE_WALLET_WIF?.trim();
   if (!wif) throw new HttpError(503, "Site wallet is not configured");
   let key: PrivateKey;
@@ -176,13 +203,16 @@ export async function inscribeMarkdown(
     throw new HttpError(503, "Site wallet is not configured");
   }
   try {
-    const address = key.toAddress();
-    const utxos = await fetchUtxos(address);
-    const tx = await buildMintTransaction({ key, utxos, markdown, contentType });
+    const changeAddress = key.toAddress();
+    const recipient = recipientAddress?.trim()
+      ? parseMainnetP2pkhAddress(recipientAddress)
+      : changeAddress;
+    const utxos = await fetchUtxos(changeAddress);
+    const tx = await buildMintTransaction({ key, utxos, markdown, contentType, recipientAddress: recipient });
     const hex = tx.toHex();
     const signedId = tx.id("hex");
     const txid = (await broadcastRaw(hex, signedId)).toLowerCase();
-    return { txid, origin: nftOriginFromTxid(txid) };
+    return { txid, origin: nftOriginFromTxid(txid), recipient };
   } catch (err) {
     if (err instanceof HttpError) throw err;
     const message = err instanceof Error && err.message ? err.message : "unknown inscription error";
